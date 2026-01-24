@@ -1,0 +1,2 @@
+# finnysights
+Stock Insights Application

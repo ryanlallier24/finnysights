@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, Search, Globe, BarChart3, MessageSquare, Users, Zap, ChevronRight, Star, Clock, Volume2, Eye, Filter, Bell, Settings, RefreshCw, Activity, Plus, X, Check, Heart, Trash2, LogOut, Wifi, WifiOff } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, Search, Globe, BarChart3, MessageSquare, Users, Zap, ChevronRight, Star, Clock, Volume2, Eye, Filter, Bell, Settings, RefreshCw, Activity, Plus, X, Check, Heart, Trash2, LogOut, Wifi, WifiOff, Loader } from 'lucide-react';
 import { auth } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { addToWatchlist, removeFromWatchlist, getWatchlist, recordVote, removeVote, getUserVotes, getUserProfile } from './firestore.js';
-import { getMultipleQuotes, searchStocks } from './stockApi.js';
+import { getMultipleQuotes, getQuote, searchStocks } from './stockApi.js';
 
 // Thumbs Up Logo Component
 const ThumbsUpLogo = ({ size = 22, className = "" }) => (
@@ -141,14 +141,53 @@ const SentimentMeter = ({ score, size = 'md' }) => {
   );
 };
 
+// Search dropdown component
+const SearchDropdown = ({ query, results, isLoading, onSelect, onClose }) => {
+  if (!query || query.length < 1) return null;
+  
+  return (
+    <div className="absolute top-full left-0 right-0 mt-2 bg-slate-800 border border-slate-700 rounded-xl shadow-xl shadow-black/50 overflow-hidden z-50">
+      {isLoading ? (
+        <div className="p-4 flex items-center justify-center gap-2">
+          <Loader size={16} className="animate-spin text-cyan-400" />
+          <span className="text-sm text-slate-400">Searching...</span>
+        </div>
+      ) : results.length > 0 ? (
+        <div className="max-h-80 overflow-y-auto">
+          {results.map((stock, i) => (
+            <button
+              key={stock.symbol}
+              onClick={() => onSelect(stock)}
+              className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-700/50 transition-colors border-b border-slate-700/50 last:border-0"
+            >
+              <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold text-sm">
+                {stock.symbol.substring(0, 2)}
+              </div>
+              <div className="flex-1 text-left">
+                <p className="font-bold text-white text-sm">{stock.symbol}</p>
+                <p className="text-xs text-slate-400 truncate">{stock.name}</p>
+              </div>
+              <Plus size={16} className="text-slate-500" />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="p-4 text-center">
+          <p className="text-sm text-slate-400">No stocks found for "{query}"</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // Stock card component with real data
 const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchlist, userVote, onVote, currentUser, isLoading }) => {
-  const [localVotes, setLocalVotes] = useState({ up: stock.thumbsUp, down: stock.thumbsDown });
+  const [localVotes, setLocalVotes] = useState({ up: stock.thumbsUp || 0, down: stock.thumbsDown || 0 });
   const [isVoting, setIsVoting] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
 
   useEffect(() => {
-    setLocalVotes({ up: stock.thumbsUp, down: stock.thumbsDown });
+    setLocalVotes({ up: stock.thumbsUp || 0, down: stock.thumbsDown || 0 });
   }, [stock]);
 
   const handleVote = async (type, e) => {
@@ -265,7 +304,7 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
               </>
             )}
           </div>
-          <SentimentMeter score={stock.sentiment} size="sm" />
+          <SentimentMeter score={stock.sentiment || 50} size="sm" />
         </div>
         
         {/* Voting */}
@@ -341,7 +380,7 @@ const StockDetailPanel = ({ stock, onClose, userVote, isLoading }) => {
             <h3 className="text-xl font-bold text-white">{stock.ticker}</h3>
             <p className="text-sm text-slate-400">{stock.name}</p>
             <div className="flex items-center gap-2 mt-1">
-              <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-[10px] font-bold rounded">{stock.sector}</span>
+              <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-[10px] font-bold rounded">{stock.sector || 'Stock'}</span>
               {userVote && (
                 <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${
                   userVote === 'bullish' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
@@ -402,12 +441,12 @@ const StockDetailPanel = ({ stock, onClose, userVote, isLoading }) => {
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-bold text-slate-300">Community Sentiment</span>
           <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-            stock.sentiment >= 70 ? 'bg-emerald-500/20 text-emerald-400' :
-            stock.sentiment >= 40 ? 'bg-amber-500/20 text-amber-400' :
+            (stock.sentiment || 50) >= 70 ? 'bg-emerald-500/20 text-emerald-400' :
+            (stock.sentiment || 50) >= 40 ? 'bg-amber-500/20 text-amber-400' :
             'bg-rose-500/20 text-rose-400'
-          }`}>{stock.sentimentLabel}</span>
+          }`}>{stock.sentimentLabel || 'Neutral'}</span>
         </div>
-        <SentimentMeter score={stock.sentiment} size="lg" />
+        <SentimentMeter score={stock.sentiment || 50} size="lg" />
       </div>
       
       {/* Sentiment sources */}
@@ -505,12 +544,103 @@ export default function Finnysights() {
   const [isLoadingPrices, setIsLoadingPrices] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [isOnline, setIsOnline] = useState(true);
+  
+  // Search state
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const searchRef = useRef(null);
+  const searchTimeoutRef = useRef(null);
+
+  // Close search dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (searchRef.current && !searchRef.current.contains(e.target)) {
+        setShowSearchDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Search stocks with debounce
+  useEffect(() => {
+    if (searchQuery.length < 1) {
+      setSearchResults([]);
+      setShowSearchDropdown(false);
+      return;
+    }
+
+    // Check if searching for existing stocks
+    const localResults = stocks.filter(s => 
+      s.ticker.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      s.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    if (localResults.length > 0 && searchQuery.length < 3) {
+      // Use local results for short queries
+      setShowSearchDropdown(false);
+      return;
+    }
+
+    // Debounce API search
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    searchTimeoutRef.current = setTimeout(async () => {
+      setIsSearching(true);
+      setShowSearchDropdown(true);
+      const results = await searchStocks(searchQuery);
+      setSearchResults(results);
+      setIsSearching(false);
+    }, 300);
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchQuery, stocks]);
+
+  // Handle search result selection
+  const handleSearchSelect = async (result) => {
+    setShowSearchDropdown(false);
+    setSearchQuery('');
+    
+    // Check if stock already exists in our list
+    const existingStock = stocks.find(s => s.ticker === result.symbol);
+    if (existingStock) {
+      setSelectedStock(existingStock);
+      return;
+    }
+    
+    // Fetch quote for new stock and add it
+    const quote = await getQuote(result.symbol);
+    const newStock = {
+      ticker: result.symbol,
+      name: result.name,
+      sector: 'Stock',
+      price: quote?.currentPrice || 0,
+      change: quote?.changePercent || 0,
+      high: quote?.high || 0,
+      low: quote?.low || 0,
+      open: quote?.open || 0,
+      thumbsUp: 0,
+      thumbsDown: 0,
+      sentiment: 50,
+      sentimentLabel: 'Neutral',
+    };
+    
+    setStocks(prev => [newStock, ...prev]);
+    setSelectedStock(newStock);
+  };
 
   // Fetch real stock prices
   const fetchPrices = useCallback(async () => {
     setIsLoadingPrices(true);
     try {
-      const symbols = DEFAULT_STOCKS.map(s => s.ticker);
+      const symbols = stocks.map(s => s.ticker);
       const quotes = await getMultipleQuotes(symbols);
       
       setStocks(prev => prev.map(stock => {
@@ -535,7 +665,7 @@ export default function Finnysights() {
       setIsOnline(false);
     }
     setIsLoadingPrices(false);
-  }, []);
+  }, [stocks]);
 
   // Initial price fetch
   useEffect(() => {
@@ -544,7 +674,7 @@ export default function Finnysights() {
     // Refresh prices every 60 seconds
     const interval = setInterval(fetchPrices, 60000);
     return () => clearInterval(interval);
-  }, [fetchPrices]);
+  }, []);
 
   // Auth state listener
   useEffect(() => {
@@ -619,10 +749,13 @@ export default function Finnysights() {
   const isStockInWatchlist = (ticker) => watchlist.some(s => s.symbol === ticker);
   const watchlistStocks = stocks.filter(s => isStockInWatchlist(s.ticker));
 
-  const filteredStocks = stocks.filter(s => 
-    s.ticker.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    s.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filter stocks based on search (local filter for displayed stocks)
+  const filteredStocks = searchQuery.length > 0 && !showSearchDropdown
+    ? stocks.filter(s => 
+        s.ticker.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        s.name.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : stocks;
 
   const displayStocks = activeTab === 'watchlist' ? watchlistStocks : filteredStocks;
 
@@ -665,18 +798,38 @@ export default function Finnysights() {
               </div>
             </div>
             
-            {/* Search */}
-            <div className="flex-1 max-w-md mx-4">
+            {/* Search with dropdown */}
+            <div className="flex-1 max-w-md mx-4 relative" ref={searchRef}>
               <div className="relative">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
                   type="text"
-                  placeholder="Search stocks..."
+                  placeholder="Search any stock (e.g. AAPL, MSFT)..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={() => searchQuery.length >= 2 && setShowSearchDropdown(true)}
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 transition-colors"
                 />
+                {searchQuery && (
+                  <button 
+                    onClick={() => { setSearchQuery(''); setShowSearchDropdown(false); }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </div>
+              
+              {/* Search dropdown */}
+              {showSearchDropdown && (
+                <SearchDropdown
+                  query={searchQuery}
+                  results={searchResults}
+                  isLoading={isSearching}
+                  onSelect={handleSearchSelect}
+                  onClose={() => setShowSearchDropdown(false)}
+                />
+              )}
             </div>
             
             {/* Right side */}
@@ -738,7 +891,7 @@ export default function Finnysights() {
           <div className="max-w-7xl mx-auto px-4 py-1.5 flex items-center justify-center gap-2">
             <Wifi size={12} className={isOnline ? 'text-emerald-400' : 'text-rose-400'} />
             <span className="text-[10px] text-slate-500">
-              {isOnline ? 'Live prices' : 'Offline'} • Last updated: {lastUpdated.toLocaleTimeString()}
+              {isOnline ? 'Live prices' : 'Offline'} • Last updated: {lastUpdated.toLocaleTimeString()} • Search any US stock
             </span>
           </div>
         </div>
@@ -792,7 +945,7 @@ export default function Finnysights() {
               <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
                 <Star size={32} className="mx-auto text-slate-600 mb-3" />
                 <h3 className="text-lg font-bold text-white mb-2">Your watchlist is empty</h3>
-                <p className="text-slate-400 text-sm mb-4">Click the star icon on any stock to add it</p>
+                <p className="text-slate-400 text-sm mb-4">Search for stocks and click the star to add them</p>
                 <button 
                   onClick={() => setActiveTab('trending')}
                   className="px-6 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold text-sm transition-colors"
@@ -824,10 +977,11 @@ export default function Finnysights() {
             )}
             
             {/* No results */}
-            {searchQuery && filteredStocks.length === 0 && activeTab !== 'watchlist' && (
+            {searchQuery && filteredStocks.length === 0 && !showSearchDropdown && activeTab !== 'watchlist' && (
               <div className="text-center py-12">
                 <Search size={32} className="mx-auto text-slate-600 mb-3" />
                 <p className="text-slate-400">No stocks found for "{searchQuery}"</p>
+                <p className="text-slate-500 text-sm mt-2">Try searching for a stock symbol like AAPL or TSLA</p>
               </div>
             )}
           </div>
@@ -845,6 +999,7 @@ export default function Finnysights() {
               <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
                 <BarChart3 size={32} className="mx-auto text-slate-600 mb-3" />
                 <p className="text-slate-400 text-sm">Select a stock to view details</p>
+                <p className="text-slate-500 text-xs mt-2">Or search for any US stock above</p>
               </div>
             )}
             <SocialFeed />

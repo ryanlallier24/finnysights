@@ -9,6 +9,7 @@ import {
   onAuthStateChanged,
   signOut
 } from 'firebase/auth';
+import { createUserProfile, getUserProfile } from './firestore.js';
 
 // Thumbs Up Logo Component
 const ThumbsUpLogo = ({ size = 22, className = "" }) => (
@@ -661,19 +662,33 @@ export default function FinnysightsLanding() {
   const [authModal, setAuthModal] = useState({ open: false, mode: 'login' });
   const [currentUser, setCurrentUser] = useState(null);
 
+  const [userProfile, setUserProfile] = useState(null);
+
   // Listen for auth state changes
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       console.log('Auth state changed:', user);
+      
+      if (user) {
+        // Load or create user profile in Firestore
+        const profile = await createUserProfile(user);
+        setUserProfile(profile);
+        console.log('User profile:', profile);
+      } else {
+        setUserProfile(null);
+      }
     });
     return () => unsubscribe();
   }, []);
 
-  const handleAuthSuccess = (user) => {
+  const handleAuthSuccess = async (user) => {
     console.log('Auth success:', user);
-    // You can redirect to dashboard here
-    // window.location.href = '/app';
+    // Create/update user profile in Firestore
+    const profile = await createUserProfile(user);
+    setUserProfile(profile);
+    // Redirect to dashboard
+    window.location.href = '/app';
   };
 
   const handleSignOut = async () => {

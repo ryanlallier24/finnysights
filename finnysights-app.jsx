@@ -30,6 +30,8 @@ const EXCHANGES = [
   { id: 'nasdaq', name: 'NASDAQ', country: 'US', flag: '🇺🇸', status: 'open', change: 0.67 },
   { id: 'binance', name: 'Binance', country: 'CRYPTO', flag: '🪙', status: 'open', change: 1.24 },
   { id: 'coinbase', name: 'Coinbase', country: 'CRYPTO', flag: '🪙', status: 'open', change: 0.89 },
+  { id: 'lse', name: 'LSE', country: 'UK', flag: '🇬🇧', status: 'closed', change: -0.12 },
+  { id: 'tse', name: 'TSE', country: 'JP', flag: '🇯🇵', status: 'closed', change: 1.24 },
 ];
 
 const CRYPTO_ICONS = { BTC: '₿', ETH: 'Ξ', BNB: '◆', SOL: '◎', XRP: '✕', ADA: '₳', DOGE: 'Ð', DOT: '●', MATIC: '⬡', LTC: 'Ł' };

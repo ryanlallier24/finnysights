@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, Search, Globe, BarChart3, MessageSquare, Users, Zap, ChevronRight, Star, Clock, Volume2, Eye, Filter, Bell, Settings, RefreshCw, Activity, Plus, X, Check, Heart, Trash2, LogOut } from 'lucide-react';
+import { TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, Search, Globe, BarChart3, MessageSquare, Users, Zap, ChevronRight, Star, Clock, Volume2, Eye, Filter, Bell, Settings, RefreshCw, Activity, Plus, X, Check, Heart, Trash2, LogOut, Wifi, WifiOff } from 'lucide-react';
 import { auth } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { addToWatchlist, removeFromWatchlist, getWatchlist, recordVote, removeVote, getUserVotes, getUserProfile } from './firestore.js';
+import { getMultipleQuotes, searchStocks } from './stockApi.js';
 
 // Thumbs Up Logo Component
 const ThumbsUpLogo = ({ size = 22, className = "" }) => (
@@ -17,6 +18,18 @@ const ThumbsUpLogo = ({ size = 22, className = "" }) => (
   </svg>
 );
 
+// Default stock data (used as fallback and for sentiment/votes)
+const DEFAULT_STOCKS = [
+  { ticker: 'AAPL', name: 'Apple Inc.', sector: 'Technology', thumbsUp: 8934, thumbsDown: 1243, sentiment: 87, sentimentLabel: 'Very Bullish' },
+  { ticker: 'TSLA', name: 'Tesla Inc.', sector: 'Automotive', thumbsUp: 12453, thumbsDown: 8932, sentiment: 58, sentimentLabel: 'Neutral' },
+  { ticker: 'NVDA', name: 'NVIDIA Corp.', sector: 'Technology', thumbsUp: 15678, thumbsDown: 2134, sentiment: 92, sentimentLabel: 'Extremely Bullish' },
+  { ticker: 'MSFT', name: 'Microsoft Corp.', sector: 'Technology', thumbsUp: 7823, thumbsDown: 1923, sentiment: 81, sentimentLabel: 'Bullish' },
+  { ticker: 'AMZN', name: 'Amazon.com Inc.', sector: 'E-Commerce', thumbsUp: 6234, thumbsDown: 2341, sentiment: 73, sentimentLabel: 'Bullish' },
+  { ticker: 'GOOGL', name: 'Alphabet Inc.', sector: 'Technology', thumbsUp: 9234, thumbsDown: 2134, sentiment: 81, sentimentLabel: 'Bullish' },
+  { ticker: 'META', name: 'Meta Platforms', sector: 'Technology', thumbsUp: 7823, thumbsDown: 3421, sentiment: 70, sentimentLabel: 'Bullish' },
+  { ticker: 'JPM', name: 'JPMorgan Chase', sector: 'Finance', thumbsUp: 4523, thumbsDown: 1876, sentiment: 71, sentimentLabel: 'Bullish' },
+];
+
 // Mock data for global exchanges
 const EXCHANGES = [
   { id: 'nyse', name: 'NYSE', country: 'US', flag: '🇺🇸', status: 'open', change: 0.42 },
@@ -27,19 +40,6 @@ const EXCHANGES = [
   { id: 'hkex', name: 'HKEX', country: 'HK', flag: '🇭🇰', status: 'closed', change: 0.89 },
   { id: 'euronext', name: 'Euronext', country: 'EU', flag: '🇪🇺', status: 'open', change: 0.23 },
   { id: 'asx', name: 'ASX', country: 'AU', flag: '🇦🇺', status: 'closed', change: -0.56 },
-];
-
-const STOCKS = [
-  { ticker: 'AAPL', name: 'Apple Inc.', price: 178.42, change: 2.34, volume: '45.2M', exchange: 'NASDAQ', sector: 'Technology', thumbsUp: 8934, thumbsDown: 1243, sentiment: 87, sentimentLabel: 'Very Bullish' },
-  { ticker: 'TSLA', name: 'Tesla Inc.', price: 245.67, change: -3.12, volume: '89.1M', exchange: 'NASDAQ', sector: 'Automotive', thumbsUp: 12453, thumbsDown: 8932, sentiment: 58, sentimentLabel: 'Neutral' },
-  { ticker: 'NVDA', name: 'NVIDIA Corp.', price: 487.23, change: 12.45, volume: '67.3M', exchange: 'NASDAQ', sector: 'Technology', thumbsUp: 15678, thumbsDown: 2134, sentiment: 92, sentimentLabel: 'Extremely Bullish' },
-  { ticker: 'MSFT', name: 'Microsoft Corp.', price: 378.92, change: 1.23, volume: '23.4M', exchange: 'NASDAQ', sector: 'Technology', thumbsUp: 7823, thumbsDown: 1923, sentiment: 81, sentimentLabel: 'Bullish' },
-  { ticker: 'AMZN', name: 'Amazon.com Inc.', price: 145.78, change: -0.89, volume: '34.2M', exchange: 'NASDAQ', sector: 'E-Commerce', thumbsUp: 6234, thumbsDown: 2341, sentiment: 73, sentimentLabel: 'Bullish' },
-  { ticker: 'JPM', name: 'JPMorgan Chase', price: 167.34, change: 0.45, volume: '12.1M', exchange: 'NYSE', sector: 'Finance', thumbsUp: 4523, thumbsDown: 1876, sentiment: 71, sentimentLabel: 'Bullish' },
-  { ticker: 'BABA', name: 'Alibaba Group', price: 78.23, change: -1.67, volume: '28.9M', exchange: 'HKEX', sector: 'E-Commerce', thumbsUp: 3421, thumbsDown: 4532, sentiment: 43, sentimentLabel: 'Bearish' },
-  { ticker: 'TSM', name: 'Taiwan Semi.', price: 98.45, change: 3.21, volume: '18.7M', exchange: 'TSE', sector: 'Technology', thumbsUp: 8934, thumbsDown: 1234, sentiment: 88, sentimentLabel: 'Very Bullish' },
-  { ticker: 'GOOGL', name: 'Alphabet Inc.', price: 141.23, change: 0.67, volume: '21.3M', exchange: 'NASDAQ', sector: 'Technology', thumbsUp: 9234, thumbsDown: 2134, sentiment: 81, sentimentLabel: 'Bullish' },
-  { ticker: 'META', name: 'Meta Platforms', price: 367.89, change: 4.21, volume: '19.8M', exchange: 'NASDAQ', sector: 'Technology', thumbsUp: 7823, thumbsDown: 3421, sentiment: 70, sentimentLabel: 'Bullish' },
 ];
 
 const SENTIMENT_SOURCES = [
@@ -53,7 +53,7 @@ const SOCIAL_POSTS = [
   { user: 'TradingPro', avatar: '👨‍💼', ticker: 'NVDA', content: 'AI boom continues! NVDA breaking through resistance levels. Target $550 EOY.', time: '2m', likes: 234, sentiment: 'bullish' },
   { user: 'MarketWatcher', avatar: '📊', ticker: 'TSLA', content: 'Watching TSLA closely at this support level. Could go either way from here.', time: '5m', likes: 156, sentiment: 'neutral' },
   { user: 'ValueInvestor', avatar: '🎯', ticker: 'AAPL', content: 'AAPL fundamentals remain strong. Services revenue growth is undervalued.', time: '12m', likes: 423, sentiment: 'bullish' },
-  { user: 'BearishBen', avatar: '🐻', ticker: 'BABA', content: 'China tech facing headwinds. BABA might test lower support soon.', time: '18m', likes: 89, sentiment: 'bearish' },
+  { user: 'BearishBen', avatar: '🐻', ticker: 'META', content: 'META facing headwinds with AI spending. Watch for pullback.', time: '18m', likes: 89, sentiment: 'bearish' },
 ];
 
 // Animated background component
@@ -141,13 +141,12 @@ const SentimentMeter = ({ score, size = 'md' }) => {
   );
 };
 
-// Stock card component with persistent voting
-const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchlist, userVote, onVote, currentUser }) => {
+// Stock card component with real data
+const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchlist, userVote, onVote, currentUser, isLoading }) => {
   const [localVotes, setLocalVotes] = useState({ up: stock.thumbsUp, down: stock.thumbsDown });
   const [isVoting, setIsVoting] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
 
-  // Initialize local votes based on user's previous vote
   useEffect(() => {
     setLocalVotes({ up: stock.thumbsUp, down: stock.thumbsDown });
   }, [stock]);
@@ -166,22 +165,17 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
     const voteValue = type === 'up' ? 'bullish' : 'bearish';
     const currentVote = userVote;
 
-    // Optimistic UI update
     if (currentVote === voteValue) {
-      // Remove vote
       setLocalVotes(prev => ({
         up: type === 'up' ? prev.up - 1 : prev.up,
         down: type === 'down' ? prev.down - 1 : prev.down
       }));
       await onVote(stock.ticker, null);
     } else {
-      // Add or change vote
       setLocalVotes(prev => {
         const newVotes = { ...prev };
-        // Remove previous vote
         if (currentVote === 'bullish') newVotes.up -= 1;
         if (currentVote === 'bearish') newVotes.down -= 1;
-        // Add new vote
         if (type === 'up') newVotes.up += 1;
         if (type === 'down') newVotes.down += 1;
         return newVotes;
@@ -206,6 +200,9 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
   const totalVotes = localVotes.up + localVotes.down;
   const bullishPercent = totalVotes > 0 ? Math.round((localVotes.up / totalVotes) * 100) : 50;
 
+  const price = stock.price || 0;
+  const change = stock.change || 0;
+
   return (
     <div 
       onClick={() => onSelect(stock)}
@@ -215,7 +212,6 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
           : 'bg-slate-800/30 border-slate-700/50 hover:border-cyan-500/30 hover:bg-slate-800/50'
       }`}
     >
-      {/* Glow effect */}
       <div className={`absolute inset-0 bg-gradient-to-r from-cyan-500/5 to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
       
       <div className="relative">
@@ -223,7 +219,7 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold ${
-              stock.change >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+              change >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
             }`}>
               {stock.ticker.substring(0, 2)}
             </div>
@@ -251,14 +247,23 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
           </button>
         </div>
         
-        {/* Price */}
+        {/* Price - REAL DATA */}
         <div className="flex items-end justify-between mb-3">
           <div>
-            <p className="text-xl font-bold font-mono text-white">${stock.price}</p>
-            <div className={`flex items-center gap-1 ${stock.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {stock.change >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-              <span className="text-xs font-mono">{stock.change >= 0 ? '+' : ''}{stock.change}%</span>
-            </div>
+            {isLoading ? (
+              <div className="animate-pulse">
+                <div className="h-6 w-20 bg-slate-700 rounded mb-1"></div>
+                <div className="h-4 w-14 bg-slate-700 rounded"></div>
+              </div>
+            ) : (
+              <>
+                <p className="text-xl font-bold font-mono text-white">${price.toFixed(2)}</p>
+                <div className={`flex items-center gap-1 ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {change >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                  <span className="text-xs font-mono">{change >= 0 ? '+' : ''}{change.toFixed(2)}%</span>
+                </div>
+              </>
+            )}
           </div>
           <SentimentMeter score={stock.sentiment} size="sm" />
         </div>
@@ -313,16 +318,22 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
   );
 };
 
-// Stock detail panel
-const StockDetailPanel = ({ stock, onClose, userVote }) => {
+// Stock detail panel with real data
+const StockDetailPanel = ({ stock, onClose, userVote, isLoading }) => {
   if (!stock) return null;
+  
+  const price = stock.price || 0;
+  const change = stock.change || 0;
+  const high = stock.high || 0;
+  const low = stock.low || 0;
+  const open = stock.open || 0;
   
   return (
     <div className="bg-slate-800/50 rounded-2xl border border-slate-700/50 p-5 animate-slideIn">
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-2xl font-bold ${
-            stock.change >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+            change >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
           }`}>
             {stock.ticker.substring(0, 2)}
           </div>
@@ -330,7 +341,6 @@ const StockDetailPanel = ({ stock, onClose, userVote }) => {
             <h3 className="text-xl font-bold text-white">{stock.ticker}</h3>
             <p className="text-sm text-slate-400">{stock.name}</p>
             <div className="flex items-center gap-2 mt-1">
-              <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-[10px] font-bold rounded">{stock.exchange}</span>
               <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-[10px] font-bold rounded">{stock.sector}</span>
               {userVote && (
                 <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${
@@ -347,28 +357,50 @@ const StockDetailPanel = ({ stock, onClose, userVote }) => {
         </button>
       </div>
       
-      {/* Price section */}
+      {/* Price section - REAL DATA */}
       <div className="grid grid-cols-3 gap-4 mb-4 p-3 bg-slate-900/50 rounded-xl">
-        <div>
-          <p className="text-[10px] text-slate-500 mb-1">Price</p>
-          <p className="text-lg font-bold font-mono text-white">${stock.price}</p>
-        </div>
-        <div>
-          <p className="text-[10px] text-slate-500 mb-1">24h Change</p>
-          <p className={`text-lg font-bold font-mono ${stock.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {stock.change >= 0 ? '+' : ''}{stock.change}%
-          </p>
-        </div>
-        <div>
-          <p className="text-[10px] text-slate-500 mb-1">Volume</p>
-          <p className="text-lg font-bold font-mono text-white">{stock.volume}</p>
-        </div>
+        {isLoading ? (
+          <div className="col-span-3 text-center py-2">
+            <RefreshCw size={20} className="animate-spin mx-auto text-cyan-400" />
+          </div>
+        ) : (
+          <>
+            <div>
+              <p className="text-[10px] text-slate-500 mb-1">Price</p>
+              <p className="text-lg font-bold font-mono text-white">${price.toFixed(2)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-slate-500 mb-1">Change</p>
+              <p className={`text-lg font-bold font-mono ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {change >= 0 ? '+' : ''}{change.toFixed(2)}%
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] text-slate-500 mb-1">Open</p>
+              <p className="text-lg font-bold font-mono text-white">${open.toFixed(2)}</p>
+            </div>
+          </>
+        )}
       </div>
+
+      {/* High/Low */}
+      {!isLoading && (
+        <div className="grid grid-cols-2 gap-4 mb-4 p-3 bg-slate-900/50 rounded-xl">
+          <div>
+            <p className="text-[10px] text-slate-500 mb-1">Day High</p>
+            <p className="text-sm font-bold font-mono text-emerald-400">${high.toFixed(2)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-slate-500 mb-1">Day Low</p>
+            <p className="text-sm font-bold font-mono text-rose-400">${low.toFixed(2)}</p>
+          </div>
+        </div>
+      )}
       
       {/* Sentiment section */}
       <div className="mb-4">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-bold text-slate-300">Market Sentiment</span>
+          <span className="text-sm font-bold text-slate-300">Community Sentiment</span>
           <span className={`px-2 py-1 rounded-full text-xs font-bold ${
             stock.sentiment >= 70 ? 'bg-emerald-500/20 text-emerald-400' :
             stock.sentiment >= 40 ? 'bg-amber-500/20 text-amber-400' :
@@ -426,7 +458,6 @@ const SocialFeed = () => (
       <div 
         key={i} 
         className="p-3 bg-slate-800/30 rounded-lg border border-slate-700/50 hover:border-purple-500/30 transition-all"
-        style={{ animationDelay: `${i * 100}ms` }}
       >
         <div className="flex items-start gap-2">
           <span className="text-2xl">{post.avatar}</span>
@@ -468,21 +499,63 @@ export default function Finnysights() {
   const [watchlist, setWatchlist] = useState([]);
   const [userVotes, setUserVotes] = useState({});
   const [isLoadingWatchlist, setIsLoadingWatchlist] = useState(false);
+  
+  // Real stock data state
+  const [stocks, setStocks] = useState(DEFAULT_STOCKS.map(s => ({ ...s, price: 0, change: 0, high: 0, low: 0, open: 0 })));
+  const [isLoadingPrices, setIsLoadingPrices] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [isOnline, setIsOnline] = useState(true);
+
+  // Fetch real stock prices
+  const fetchPrices = useCallback(async () => {
+    setIsLoadingPrices(true);
+    try {
+      const symbols = DEFAULT_STOCKS.map(s => s.ticker);
+      const quotes = await getMultipleQuotes(symbols);
+      
+      setStocks(prev => prev.map(stock => {
+        const quote = quotes[stock.ticker];
+        if (quote) {
+          return {
+            ...stock,
+            price: quote.currentPrice,
+            change: quote.changePercent,
+            high: quote.high,
+            low: quote.low,
+            open: quote.open,
+          };
+        }
+        return stock;
+      }));
+      
+      setLastUpdated(new Date());
+      setIsOnline(true);
+    } catch (error) {
+      console.error('Error fetching prices:', error);
+      setIsOnline(false);
+    }
+    setIsLoadingPrices(false);
+  }, []);
+
+  // Initial price fetch
+  useEffect(() => {
+    fetchPrices();
+    
+    // Refresh prices every 60 seconds
+    const interval = setInterval(fetchPrices, 60000);
+    return () => clearInterval(interval);
+  }, [fetchPrices]);
 
   // Auth state listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
-        // Load watchlist and votes from Firestore
         setIsLoadingWatchlist(true);
         const userWatchlist = await getWatchlist(user.uid);
         setWatchlist(userWatchlist || []);
-        
-        // Load user's votes
         const votes = await getUserVotes(user.uid);
         setUserVotes(votes || {});
-        
         setIsLoadingWatchlist(false);
       } else {
         setWatchlist([]);
@@ -527,7 +600,6 @@ export default function Finnysights() {
     if (!currentUser) return;
     
     if (vote === null) {
-      // Remove vote
       await removeVote(currentUser.uid, ticker);
       setUserVotes(prev => {
         const updated = { ...prev };
@@ -535,7 +607,6 @@ export default function Finnysights() {
         return updated;
       });
     } else {
-      // Record vote
       await recordVote(currentUser.uid, ticker, vote);
       setUserVotes(prev => ({
         ...prev,
@@ -544,15 +615,11 @@ export default function Finnysights() {
     }
   };
 
-  const getUserVoteForStock = (ticker) => {
-    return userVotes[ticker]?.vote || null;
-  };
-
+  const getUserVoteForStock = (ticker) => userVotes[ticker]?.vote || null;
   const isStockInWatchlist = (ticker) => watchlist.some(s => s.symbol === ticker);
+  const watchlistStocks = stocks.filter(s => isStockInWatchlist(s.ticker));
 
-  const watchlistStocks = STOCKS.filter(s => isStockInWatchlist(s.ticker));
-
-  const filteredStocks = STOCKS.filter(s => 
+  const filteredStocks = stocks.filter(s => 
     s.ticker.toLowerCase().includes(searchQuery.toLowerCase()) ||
     s.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -565,37 +632,13 @@ export default function Finnysights() {
       
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@400;600;700;900&display=swap');
-        
-        * {
-          font-family: 'Outfit', sans-serif;
-        }
-        
-        .font-mono {
-          font-family: 'JetBrains Mono', monospace;
-        }
-        
-        @keyframes pulse {
-          0%, 100% { opacity: 0.3; transform: scale(1); }
-          50% { opacity: 1; transform: scale(1.5); }
-        }
-        
-        @keyframes slideIn {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        
-        .animate-slideIn {
-          animation: slideIn 0.5s ease-out forwards;
-        }
-        
-        .animate-fadeIn {
-          animation: fadeIn 0.3s ease-out forwards;
-        }
+        * { font-family: 'Outfit', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        @keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(1); } 50% { opacity: 1; transform: scale(1.5); } }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .animate-slideIn { animation: slideIn 0.5s ease-out forwards; }
+        .animate-fadeIn { animation: fadeIn 0.3s ease-out forwards; }
       `}</style>
       
       {/* Header */}
@@ -611,13 +654,14 @@ export default function Finnysights() {
                 <span className="text-xl font-black tracking-tight hidden sm:block">finnysights</span>
               </a>
               
-              {/* Time */}
+              {/* Time & Status */}
               <div className="hidden md:flex items-center gap-2 ml-4 px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50">
                 <Clock size={14} className="text-cyan-400" />
                 <span className="font-mono text-sm text-slate-300">
                   {time.toLocaleTimeString('en-US', { hour12: false })}
                 </span>
                 <span className="text-[10px] text-slate-500">EST</span>
+                <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-rose-400'}`} />
               </div>
             </div>
             
@@ -627,7 +671,7 @@ export default function Finnysights() {
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
                   type="text"
-                  placeholder="Search stocks, sectors..."
+                  placeholder="Search stocks..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 transition-colors"
@@ -637,6 +681,16 @@ export default function Finnysights() {
             
             {/* Right side */}
             <div className="flex items-center gap-2">
+              {/* Refresh button */}
+              <button
+                onClick={fetchPrices}
+                disabled={isLoadingPrices}
+                className="p-2.5 bg-slate-800/50 hover:bg-slate-700/50 rounded-xl transition-colors border border-slate-700/50"
+                title="Refresh prices"
+              >
+                <RefreshCw size={18} className={`text-slate-400 ${isLoadingPrices ? 'animate-spin' : ''}`} />
+              </button>
+              
               {currentUser ? (
                 <>
                   <a href="/dashboard" className="p-2.5 bg-slate-800/50 hover:bg-slate-700/50 rounded-xl transition-colors border border-slate-700/50">
@@ -678,6 +732,18 @@ export default function Finnysights() {
         </div>
       </header>
       
+      {/* Last updated banner */}
+      {lastUpdated && (
+        <div className="relative z-10 bg-slate-800/30 border-b border-slate-700/30">
+          <div className="max-w-7xl mx-auto px-4 py-1.5 flex items-center justify-center gap-2">
+            <Wifi size={12} className={isOnline ? 'text-emerald-400' : 'text-rose-400'} />
+            <span className="text-[10px] text-slate-500">
+              {isOnline ? 'Live prices' : 'Offline'} • Last updated: {lastUpdated.toLocaleTimeString()}
+            </span>
+          </div>
+        </div>
+      )}
+      
       {/* Main content */}
       <main className="relative z-10 max-w-7xl mx-auto px-4 py-6">
         <div className="grid lg:grid-cols-3 gap-6">
@@ -711,7 +777,7 @@ export default function Finnysights() {
               <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
                 <Star size={32} className="mx-auto text-slate-600 mb-3" />
                 <h3 className="text-lg font-bold text-white mb-2">Sign in to use Watchlist</h3>
-                <p className="text-slate-400 text-sm mb-4">Create an account to save your favorite stocks and track your votes</p>
+                <p className="text-slate-400 text-sm mb-4">Create an account to save your favorite stocks</p>
                 <a 
                   href="/"
                   className="inline-block px-6 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg font-bold text-sm hover:from-cyan-400 hover:to-purple-400 transition-all"
@@ -726,21 +792,13 @@ export default function Finnysights() {
               <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
                 <Star size={32} className="mx-auto text-slate-600 mb-3" />
                 <h3 className="text-lg font-bold text-white mb-2">Your watchlist is empty</h3>
-                <p className="text-slate-400 text-sm mb-4">Click the star icon on any stock to add it to your watchlist</p>
+                <p className="text-slate-400 text-sm mb-4">Click the star icon on any stock to add it</p>
                 <button 
                   onClick={() => setActiveTab('trending')}
                   className="px-6 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold text-sm transition-colors"
                 >
                   Browse Trending Stocks
                 </button>
-              </div>
-            )}
-            
-            {/* Loading state */}
-            {isLoadingWatchlist && activeTab === 'watchlist' && (
-              <div className="p-6 text-center">
-                <RefreshCw size={24} className="mx-auto text-cyan-400 animate-spin mb-2" />
-                <p className="text-slate-400 text-sm">Loading watchlist...</p>
               </div>
             )}
             
@@ -758,6 +816,7 @@ export default function Finnysights() {
                       userVote={getUserVoteForStock(stock.ticker)}
                       onVote={handleVote}
                       currentUser={currentUser}
+                      isLoading={isLoadingPrices}
                     />
                   </div>
                 ))}
@@ -780,6 +839,7 @@ export default function Finnysights() {
                 stock={selectedStock} 
                 onClose={() => setSelectedStock(null)} 
                 userVote={getUserVoteForStock(selectedStock.ticker)}
+                isLoading={isLoadingPrices}
               />
             ) : (
               <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">

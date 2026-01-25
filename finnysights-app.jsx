@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, Search, Globe, BarChart3, MessageSquare, Users, Zap, ChevronRight, Star, Clock, Volume2, Eye, Filter, Bell, Settings, RefreshCw, Activity, Plus, X, Check, Heart, Trash2, LogOut, Wifi, WifiOff, Loader, Send, Trophy, UserPlus, Target, Flame, Award, Bitcoin, Newspaper, ExternalLink, Briefcase, DollarSign, PieChart, Edit2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, Search, Globe, BarChart3, MessageSquare, Users, Zap, ChevronRight, Star, Clock, Volume2, Eye, Filter, Bell, Settings, RefreshCw, Activity, Plus, X, Check, Heart, Trash2, LogOut, Wifi, WifiOff, Loader, Send, Trophy, UserPlus, Target, Flame, Award, Bitcoin, Newspaper, ExternalLink, Briefcase, DollarSign, PieChart, BellRing, AlertTriangle } from 'lucide-react';
 import { auth } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { addToWatchlist, removeFromWatchlist, getWatchlist, recordVote, removeVote, getUserVotes, getUserProfile, addComment, getStockComments, likeComment, unlikeComment, getTopTraders, followUser, unfollowUser, addHolding, removeHolding, getPortfolio } from './firestore.js';
+import { addToWatchlist, removeFromWatchlist, getWatchlist, recordVote, removeVote, getUserVotes, getUserProfile, addComment, getStockComments, likeComment, unlikeComment, getTopTraders, followUser, unfollowUser, addHolding, removeHolding, getPortfolio, addPriceAlert, removePriceAlert } from './firestore.js';
 import { getMultipleQuotes, getQuote, searchStocks } from './stockApi.js';
 import { getCryptoMarketData, searchCrypto, formatCryptoPrice, formatMarketCap } from './cryptoApi.js';
 import { getCombinedNews, getStockNews, getCryptoNewsBySymbol, formatTimeAgo, truncateText } from './newsApi.js';
@@ -75,7 +75,269 @@ const SentimentMeter = ({ score, size = 'md' }) => {
   );
 };
 
-// Portfolio Add Holding Modal
+// Alert Notification Toast
+const AlertToast = ({ alert, currentPrice, onDismiss }) => {
+  const isAbove = alert.condition === 'above';
+  return (
+    <div className="fixed top-4 right-4 z-50 animate-slideIn">
+      <div className={`p-4 rounded-xl border shadow-xl ${isAbove ? 'bg-emerald-900/90 border-emerald-500/50' : 'bg-rose-900/90 border-rose-500/50'} backdrop-blur-sm max-w-sm`}>
+        <div className="flex items-start gap-3">
+          <div className={`p-2 rounded-lg ${isAbove ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>
+            <BellRing size={20} className={isAbove ? 'text-emerald-400' : 'text-rose-400'} />
+          </div>
+          <div className="flex-1">
+            <p className="font-bold text-white">🔔 Price Alert Triggered!</p>
+            <p className="text-sm text-slate-300 mt-1">
+              <span className="font-bold">{alert.symbol}</span> is now {isAbove ? 'above' : 'below'} ${alert.targetPrice.toFixed(2)}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">Current: ${currentPrice?.toFixed(2) || 'N/A'}</p>
+          </div>
+          <button onClick={onDismiss} className="p-1 hover:bg-white/10 rounded"><X size={16} className="text-slate-400" /></button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Add Alert Modal
+const AddAlertModal = ({ isOpen, onClose, onAdd, stocks, cryptos, currentPrices }) => {
+  const [symbol, setSymbol] = useState('');
+  const [name, setName] = useState('');
+  const [targetPrice, setTargetPrice] = useState('');
+  const [condition, setCondition] = useState('above');
+  const [isCrypto, setIsCrypto] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [searchResults, setSearchResults] = useState([]);
+  const [showSearch, setShowSearch] = useState(false);
+
+  const currentPrice = currentPrices[symbol] || 0;
+
+  useEffect(() => {
+    if (symbol.length >= 1) {
+      const stockMatches = stocks.filter(s => s.ticker.toLowerCase().includes(symbol.toLowerCase())).slice(0, 3);
+      const cryptoMatches = cryptos.filter(c => c.symbol.toLowerCase().includes(symbol.toLowerCase())).slice(0, 3);
+      setSearchResults([...stockMatches.map(s => ({ ...s, symbol: s.ticker, isCrypto: false })), ...cryptoMatches.map(c => ({ symbol: c.symbol, name: c.name, isCrypto: true }))]);
+      setShowSearch(true);
+    } else {
+      setSearchResults([]);
+      setShowSearch(false);
+    }
+  }, [symbol, stocks, cryptos]);
+
+  const selectResult = (result) => {
+    setSymbol(result.symbol || result.ticker);
+    setName(result.name);
+    setIsCrypto(result.isCrypto);
+    setShowSearch(false);
+  };
+
+  const handleSubmit = async () => {
+    if (!symbol || !targetPrice) return;
+    setIsAdding(true);
+    await onAdd({ symbol, name: name || symbol, targetPrice: parseFloat(targetPrice), condition, isCrypto });
+    setSymbol(''); setName(''); setTargetPrice(''); setCondition('above'); setIsCrypto(false);
+    setIsAdding(false);
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6 w-full max-w-md animate-slideIn">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2"><Bell size={20} className="text-amber-400" />Create Price Alert</h3>
+          <button onClick={onClose} className="p-2 hover:bg-slate-700 rounded-lg"><X size={18} className="text-slate-400" /></button>
+        </div>
+        
+        <div className="space-y-4">
+          <div className="relative">
+            <label className="block text-sm font-medium text-slate-400 mb-1">Symbol</label>
+            <input type="text" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="AAPL, BTC..."
+              className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500" />
+            {showSearch && searchResults.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl overflow-hidden z-10">
+                {searchResults.map(r => (
+                  <button key={r.symbol} onClick={() => selectResult(r)} className="w-full px-4 py-2 text-left hover:bg-slate-700 flex items-center justify-between">
+                    <span className="text-white font-medium">{r.symbol}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded ${r.isCrypto ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'}`}>{r.isCrypto ? 'CRYPTO' : 'STOCK'}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {currentPrice > 0 && (
+            <div className="p-3 bg-slate-900/50 rounded-lg border border-slate-700/50">
+              <p className="text-xs text-slate-500">Current Price</p>
+              <p className="text-lg font-bold font-mono text-white">${currentPrice.toFixed(2)}</p>
+            </div>
+          )}
+          
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-1">Alert Condition</label>
+            <div className="flex gap-2">
+              <button onClick={() => setCondition('above')} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${condition === 'above' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-400 border border-slate-600'}`}>
+                <TrendingUp size={16} />Price Goes Above
+              </button>
+              <button onClick={() => setCondition('below')} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${condition === 'below' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-slate-700 text-slate-400 border border-slate-600'}`}>
+                <TrendingDown size={16} />Price Goes Below
+              </button>
+            </div>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-1">Target Price ($)</label>
+            <input type="number" value={targetPrice} onChange={(e) => setTargetPrice(e.target.value)} placeholder={currentPrice > 0 ? (condition === 'above' ? (currentPrice * 1.1).toFixed(2) : (currentPrice * 0.9).toFixed(2)) : "0.00"} step="any"
+              className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500" />
+          </div>
+
+          {targetPrice && currentPrice > 0 && (
+            <div className={`p-3 rounded-lg ${condition === 'above' ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-rose-500/10 border border-rose-500/20'}`}>
+              <p className="text-sm text-slate-300">
+                Alert when <span className="font-bold">{symbol}</span> goes {condition} <span className="font-bold font-mono">${parseFloat(targetPrice).toFixed(2)}</span>
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                {condition === 'above' 
+                  ? `${((parseFloat(targetPrice) - currentPrice) / currentPrice * 100).toFixed(1)}% above current price`
+                  : `${((currentPrice - parseFloat(targetPrice)) / currentPrice * 100).toFixed(1)}% below current price`
+                }
+              </p>
+            </div>
+          )}
+          
+          <button onClick={handleSubmit} disabled={!symbol || !targetPrice || isAdding}
+            className="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-50 rounded-xl font-bold text-white transition-all flex items-center justify-center gap-2">
+            {isAdding ? <Loader size={18} className="animate-spin" /> : <Bell size={18} />}
+            Create Alert
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Alert Card
+const AlertCard = ({ alert, currentPrice, onRemove }) => {
+  const [isRemoving, setIsRemoving] = useState(false);
+  const isAbove = alert.condition === 'above';
+  const isTriggered = isAbove ? currentPrice >= alert.targetPrice : currentPrice <= alert.targetPrice;
+  const distance = currentPrice ? Math.abs(((currentPrice - alert.targetPrice) / alert.targetPrice) * 100).toFixed(1) : 0;
+
+  const handleRemove = async () => {
+    setIsRemoving(true);
+    await onRemove(alert.id);
+    setIsRemoving(false);
+  };
+
+  return (
+    <div className={`p-4 rounded-xl border transition-all ${isTriggered ? 'bg-amber-500/10 border-amber-500/30 animate-pulse' : 'bg-slate-800/30 border-slate-700/50'}`}>
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold ${alert.isCrypto ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
+            {alert.isCrypto ? (CRYPTO_ICONS[alert.symbol] || alert.symbol.substring(0, 2)) : alert.symbol.substring(0, 2)}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h4 className="font-bold text-white">{alert.symbol}</h4>
+              {isTriggered && <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-[9px] font-bold animate-pulse">TRIGGERED!</span>}
+            </div>
+            <p className="text-[10px] text-slate-500">{alert.name || alert.symbol}</p>
+          </div>
+        </div>
+        <button onClick={handleRemove} disabled={isRemoving} className="p-1.5 hover:bg-rose-500/20 rounded-lg transition-colors">
+          {isRemoving ? <Loader size={14} className="animate-spin text-slate-400" /> : <Trash2 size={14} className="text-slate-500 hover:text-rose-400" />}
+        </button>
+      </div>
+      
+      <div className="flex items-center gap-2 mb-3">
+        <div className={`flex items-center gap-1 px-2 py-1 rounded-lg ${isAbove ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+          {isAbove ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+          <span className="text-xs font-bold">{isAbove ? 'Above' : 'Below'}</span>
+        </div>
+        <span className="text-lg font-bold font-mono text-white">${alert.targetPrice.toFixed(2)}</span>
+      </div>
+      
+      <div className="grid grid-cols-2 gap-2 text-center">
+        <div className="p-2 bg-slate-900/50 rounded-lg">
+          <p className="text-[10px] text-slate-500 mb-1">Current Price</p>
+          <p className="text-sm font-bold font-mono text-white">${currentPrice?.toFixed(2) || 'N/A'}</p>
+        </div>
+        <div className="p-2 bg-slate-900/50 rounded-lg">
+          <p className="text-[10px] text-slate-500 mb-1">Distance</p>
+          <p className={`text-sm font-bold font-mono ${isTriggered ? 'text-amber-400' : 'text-slate-300'}`}>{distance}%</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Alerts Tab
+const AlertsTab = ({ currentUser, alerts, onAddAlert, onRemoveAlert, prices, stocks, cryptos }) => {
+  const [showAddModal, setShowAddModal] = useState(false);
+  const activeAlerts = alerts.filter(a => !a.triggered);
+  const triggeredAlerts = alerts.filter(a => a.triggered);
+
+  if (!currentUser) {
+    return (
+      <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
+        <Bell size={32} className="mx-auto text-slate-600 mb-3" />
+        <h3 className="text-lg font-bold text-white mb-2">Sign in to set price alerts</h3>
+        <a href="/" className="inline-block px-6 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg font-bold text-sm">Sign In / Sign Up</a>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold text-white flex items-center gap-2"><Bell size={20} className="text-amber-400" />Price Alerts</h2>
+        <button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg font-bold text-sm flex items-center gap-2 hover:from-amber-400 hover:to-orange-400">
+          <Plus size={16} />New Alert
+        </button>
+      </div>
+      
+      {alerts.length > 0 ? (
+        <div className="space-y-4">
+          {activeAlerts.length > 0 && (
+            <div>
+              <h3 className="text-sm font-bold text-slate-400 mb-3 flex items-center gap-2"><BellRing size={14} className="text-cyan-400" />Active Alerts ({activeAlerts.length})</h3>
+              <div className="space-y-3">
+                {activeAlerts.map(alert => (
+                  <AlertCard key={alert.id} alert={alert} currentPrice={prices[alert.symbol]} onRemove={onRemoveAlert} />
+                ))}
+              </div>
+            </div>
+          )}
+          
+          {triggeredAlerts.length > 0 && (
+            <div>
+              <h3 className="text-sm font-bold text-slate-400 mb-3 flex items-center gap-2"><Check size={14} className="text-emerald-400" />Triggered Alerts ({triggeredAlerts.length})</h3>
+              <div className="space-y-3 opacity-60">
+                {triggeredAlerts.map(alert => (
+                  <AlertCard key={alert.id} alert={alert} currentPrice={prices[alert.symbol]} onRemove={onRemoveAlert} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="p-8 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
+          <Bell size={40} className="mx-auto text-slate-600 mb-3" />
+          <h3 className="text-lg font-bold text-white mb-2">No alerts set</h3>
+          <p className="text-slate-400 text-sm mb-4">Get notified when a stock or crypto hits your target price</p>
+          <button onClick={() => setShowAddModal(true)} className="px-6 py-2 bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg font-bold text-sm">
+            <Plus size={16} className="inline mr-1" />Create Your First Alert
+          </button>
+        </div>
+      )}
+      
+      <AddAlertModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onAdd={onAddAlert} stocks={stocks} cryptos={cryptos} currentPrices={prices} />
+    </div>
+  );
+};
+
+// Portfolio Components
 const AddHoldingModal = ({ isOpen, onClose, onAdd, stocks, cryptos }) => {
   const [symbol, setSymbol] = useState('');
   const [name, setName] = useState('');
@@ -92,18 +354,10 @@ const AddHoldingModal = ({ isOpen, onClose, onAdd, stocks, cryptos }) => {
       const cryptoMatches = cryptos.filter(c => c.symbol.toLowerCase().includes(symbol.toLowerCase())).slice(0, 3);
       setSearchResults([...stockMatches.map(s => ({ ...s, isCrypto: false })), ...cryptoMatches.map(c => ({ symbol: c.symbol, name: c.name, ticker: c.symbol, isCrypto: true }))]);
       setShowSearch(true);
-    } else {
-      setSearchResults([]);
-      setShowSearch(false);
-    }
+    } else { setSearchResults([]); setShowSearch(false); }
   }, [symbol, stocks, cryptos]);
 
-  const selectResult = (result) => {
-    setSymbol(result.ticker || result.symbol);
-    setName(result.name);
-    setIsCrypto(result.isCrypto);
-    setShowSearch(false);
-  };
+  const selectResult = (result) => { setSymbol(result.ticker || result.symbol); setName(result.name); setIsCrypto(result.isCrypto); setShowSearch(false); };
 
   const handleSubmit = async () => {
     if (!symbol || !quantity || !purchasePrice) return;
@@ -123,60 +377,28 @@ const AddHoldingModal = ({ isOpen, onClose, onAdd, stocks, cryptos }) => {
           <h3 className="text-lg font-bold text-white flex items-center gap-2"><Plus size={20} className="text-cyan-400" />Add Holding</h3>
           <button onClick={onClose} className="p-2 hover:bg-slate-700 rounded-lg"><X size={18} className="text-slate-400" /></button>
         </div>
-        
         <div className="space-y-4">
           <div className="relative">
             <label className="block text-sm font-medium text-slate-400 mb-1">Symbol</label>
-            <input type="text" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="AAPL, BTC..."
-              className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500" />
-            {showSearch && searchResults.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl overflow-hidden z-10">
-                {searchResults.map(r => (
-                  <button key={r.ticker || r.symbol} onClick={() => selectResult(r)} className="w-full px-4 py-2 text-left hover:bg-slate-700 flex items-center justify-between">
-                    <span className="text-white font-medium">{r.ticker || r.symbol}</span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded ${r.isCrypto ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'}`}>{r.isCrypto ? 'CRYPTO' : 'STOCK'}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+            <input type="text" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="AAPL, BTC..." className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500" />
+            {showSearch && searchResults.length > 0 && (<div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl overflow-hidden z-10">{searchResults.map(r => (<button key={r.ticker || r.symbol} onClick={() => selectResult(r)} className="w-full px-4 py-2 text-left hover:bg-slate-700 flex items-center justify-between"><span className="text-white font-medium">{r.ticker || r.symbol}</span><span className={`text-[10px] px-2 py-0.5 rounded ${r.isCrypto ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'}`}>{r.isCrypto ? 'CRYPTO' : 'STOCK'}</span></button>))}</div>)}
           </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-slate-400 mb-1">Name (optional)</label>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Apple Inc."
-              className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500" />
-          </div>
-          
+          <div><label className="block text-sm font-medium text-slate-400 mb-1">Name (optional)</label><input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Apple Inc." className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500" /></div>
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-400 mb-1">Quantity</label>
-              <input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="10" step="any"
-                className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-400 mb-1">Purchase Price</label>
-              <input type="number" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} placeholder="150.00" step="any"
-                className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500" />
-            </div>
+            <div><label className="block text-sm font-medium text-slate-400 mb-1">Quantity</label><input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="10" step="any" className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500" /></div>
+            <div><label className="block text-sm font-medium text-slate-400 mb-1">Purchase Price</label><input type="number" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} placeholder="150.00" step="any" className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500" /></div>
           </div>
-          
           <div className="flex items-center gap-3">
             <button onClick={() => setIsCrypto(false)} className={`flex-1 py-2 rounded-lg font-medium text-sm transition-all ${!isCrypto ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'bg-slate-700 text-slate-400'}`}>📈 Stock</button>
             <button onClick={() => setIsCrypto(true)} className={`flex-1 py-2 rounded-lg font-medium text-sm transition-all ${isCrypto ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-slate-700 text-slate-400'}`}>🪙 Crypto</button>
           </div>
-          
-          <button onClick={handleSubmit} disabled={!symbol || !quantity || !purchasePrice || isAdding}
-            className="w-full py-3 bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 disabled:opacity-50 rounded-xl font-bold text-white transition-all flex items-center justify-center gap-2">
-            {isAdding ? <Loader size={18} className="animate-spin" /> : <Plus size={18} />}
-            Add to Portfolio
-          </button>
+          <button onClick={handleSubmit} disabled={!symbol || !quantity || !purchasePrice || isAdding} className="w-full py-3 bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 disabled:opacity-50 rounded-xl font-bold text-white transition-all flex items-center justify-center gap-2">{isAdding ? <Loader size={18} className="animate-spin" /> : <Plus size={18} />}Add to Portfolio</button>
         </div>
       </div>
     </div>
   );
 };
 
-// Portfolio Holding Card
 const HoldingCard = ({ holding, currentPrice, onRemove }) => {
   const [isRemoving, setIsRemoving] = useState(false);
   const costBasis = holding.quantity * holding.purchasePrice;
@@ -184,221 +406,66 @@ const HoldingCard = ({ holding, currentPrice, onRemove }) => {
   const profitLoss = currentValue - costBasis;
   const profitLossPercent = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
   const isProfit = profitLoss >= 0;
-
-  const handleRemove = async () => {
-    setIsRemoving(true);
-    await onRemove(holding.id);
-    setIsRemoving(false);
-  };
-
+  const handleRemove = async () => { setIsRemoving(true); await onRemove(holding.id); setIsRemoving(false); };
   return (
     <div className={`p-4 rounded-xl border transition-all ${holding.isCrypto ? 'bg-orange-500/5 border-orange-500/20' : 'bg-slate-800/30 border-slate-700/50'}`}>
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2">
-          <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold ${holding.isCrypto ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
-            {holding.isCrypto ? (CRYPTO_ICONS[holding.symbol] || holding.symbol.substring(0, 2)) : holding.symbol.substring(0, 2)}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h4 className="font-bold text-white">{holding.symbol}</h4>
-              {holding.isCrypto && <span className="text-[9px] px-1.5 py-0.5 bg-orange-500/20 text-orange-400 rounded">CRYPTO</span>}
-            </div>
-            <p className="text-[10px] text-slate-500">{holding.quantity} shares @ ${holding.purchasePrice.toFixed(2)}</p>
-          </div>
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold ${holding.isCrypto ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'}`}>{holding.isCrypto ? (CRYPTO_ICONS[holding.symbol] || holding.symbol.substring(0, 2)) : holding.symbol.substring(0, 2)}</div>
+          <div><div className="flex items-center gap-2"><h4 className="font-bold text-white">{holding.symbol}</h4>{holding.isCrypto && <span className="text-[9px] px-1.5 py-0.5 bg-orange-500/20 text-orange-400 rounded">CRYPTO</span>}</div><p className="text-[10px] text-slate-500">{holding.quantity} shares @ ${holding.purchasePrice.toFixed(2)}</p></div>
         </div>
-        <button onClick={handleRemove} disabled={isRemoving} className="p-1.5 hover:bg-rose-500/20 rounded-lg transition-colors">
-          {isRemoving ? <Loader size={14} className="animate-spin text-slate-400" /> : <Trash2 size={14} className="text-slate-500 hover:text-rose-400" />}
-        </button>
+        <button onClick={handleRemove} disabled={isRemoving} className="p-1.5 hover:bg-rose-500/20 rounded-lg transition-colors">{isRemoving ? <Loader size={14} className="animate-spin text-slate-400" /> : <Trash2 size={14} className="text-slate-500 hover:text-rose-400" />}</button>
       </div>
-      
       <div className="grid grid-cols-3 gap-2 text-center">
-        <div className="p-2 bg-slate-900/50 rounded-lg">
-          <p className="text-[10px] text-slate-500 mb-1">Cost Basis</p>
-          <p className="text-sm font-bold font-mono text-white">${costBasis.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-        </div>
-        <div className="p-2 bg-slate-900/50 rounded-lg">
-          <p className="text-[10px] text-slate-500 mb-1">Current Value</p>
-          <p className="text-sm font-bold font-mono text-white">${currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-        </div>
-        <div className={`p-2 rounded-lg ${isProfit ? 'bg-emerald-500/10' : 'bg-rose-500/10'}`}>
-          <p className="text-[10px] text-slate-500 mb-1">P/L</p>
-          <p className={`text-sm font-bold font-mono ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {isProfit ? '+' : ''}{profitLossPercent.toFixed(2)}%
-          </p>
-        </div>
+        <div className="p-2 bg-slate-900/50 rounded-lg"><p className="text-[10px] text-slate-500 mb-1">Cost Basis</p><p className="text-sm font-bold font-mono text-white">${costBasis.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></div>
+        <div className="p-2 bg-slate-900/50 rounded-lg"><p className="text-[10px] text-slate-500 mb-1">Current Value</p><p className="text-sm font-bold font-mono text-white">${currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></div>
+        <div className={`p-2 rounded-lg ${isProfit ? 'bg-emerald-500/10' : 'bg-rose-500/10'}`}><p className="text-[10px] text-slate-500 mb-1">P/L</p><p className={`text-sm font-bold font-mono ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>{isProfit ? '+' : ''}{profitLossPercent.toFixed(2)}%</p></div>
       </div>
     </div>
   );
 };
 
-// Portfolio Summary
 const PortfolioSummary = ({ holdings, prices }) => {
-  let totalCostBasis = 0;
-  let totalCurrentValue = 0;
-
-  holdings.forEach(h => {
-    const price = prices[h.symbol] || h.purchasePrice;
-    totalCostBasis += h.quantity * h.purchasePrice;
-    totalCurrentValue += h.quantity * price;
-  });
-
+  let totalCostBasis = 0; let totalCurrentValue = 0;
+  holdings.forEach(h => { const price = prices[h.symbol] || h.purchasePrice; totalCostBasis += h.quantity * h.purchasePrice; totalCurrentValue += h.quantity * price; });
   const totalProfitLoss = totalCurrentValue - totalCostBasis;
   const totalProfitLossPercent = totalCostBasis > 0 ? (totalProfitLoss / totalCostBasis) * 100 : 0;
   const isProfit = totalProfitLoss >= 0;
-
-  // Calculate allocation
-  const allocation = holdings.map(h => {
-    const price = prices[h.symbol] || h.purchasePrice;
-    const value = h.quantity * price;
-    return { symbol: h.symbol, value, percent: totalCurrentValue > 0 ? (value / totalCurrentValue) * 100 : 0, isCrypto: h.isCrypto };
-  }).sort((a, b) => b.value - a.value);
-
+  const allocation = holdings.map(h => { const price = prices[h.symbol] || h.purchasePrice; const value = h.quantity * price; return { symbol: h.symbol, value, percent: totalCurrentValue > 0 ? (value / totalCurrentValue) * 100 : 0, isCrypto: h.isCrypto }; }).sort((a, b) => b.value - a.value);
   return (
     <div className="space-y-4">
-      {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/50">
-          <p className="text-[10px] text-slate-500 mb-1 flex items-center gap-1"><DollarSign size={10} />Total Value</p>
-          <p className="text-2xl font-bold font-mono text-white">${totalCurrentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-        </div>
-        <div className={`p-4 rounded-xl border ${isProfit ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'}`}>
-          <p className="text-[10px] text-slate-500 mb-1 flex items-center gap-1">{isProfit ? <TrendingUp size={10} /> : <TrendingDown size={10} />}Total P/L</p>
-          <p className={`text-2xl font-bold font-mono ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {isProfit ? '+' : ''}${Math.abs(totalProfitLoss).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </p>
-          <p className={`text-sm font-mono ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-            ({isProfit ? '+' : ''}{totalProfitLossPercent.toFixed(2)}%)
-          </p>
-        </div>
+        <div className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/50"><p className="text-[10px] text-slate-500 mb-1 flex items-center gap-1"><DollarSign size={10} />Total Value</p><p className="text-2xl font-bold font-mono text-white">${totalCurrentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></div>
+        <div className={`p-4 rounded-xl border ${isProfit ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'}`}><p className="text-[10px] text-slate-500 mb-1 flex items-center gap-1">{isProfit ? <TrendingUp size={10} /> : <TrendingDown size={10} />}Total P/L</p><p className={`text-2xl font-bold font-mono ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>{isProfit ? '+' : ''}${Math.abs(totalProfitLoss).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p><p className={`text-sm font-mono ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>({isProfit ? '+' : ''}{totalProfitLossPercent.toFixed(2)}%)</p></div>
       </div>
-      
-      {/* Allocation */}
-      {allocation.length > 0 && (
-        <div className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/50">
-          <h4 className="text-sm font-bold text-slate-300 flex items-center gap-2 mb-3"><PieChart size={14} className="text-purple-400" />Allocation</h4>
-          <div className="space-y-2">
-            {allocation.slice(0, 5).map(a => (
-              <div key={a.symbol} className="flex items-center gap-2">
-                <span className={`w-8 text-xs font-bold ${a.isCrypto ? 'text-orange-400' : 'text-cyan-400'}`}>{a.symbol}</span>
-                <div className="flex-1 h-2 bg-slate-700/50 rounded-full overflow-hidden">
-                  <div className={`h-full rounded-full ${a.isCrypto ? 'bg-orange-500' : 'bg-cyan-500'}`} style={{ width: `${a.percent}%` }} />
-                </div>
-                <span className="text-xs text-slate-400 w-12 text-right">{a.percent.toFixed(1)}%</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {allocation.length > 0 && (<div className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/50"><h4 className="text-sm font-bold text-slate-300 flex items-center gap-2 mb-3"><PieChart size={14} className="text-purple-400" />Allocation</h4><div className="space-y-2">{allocation.slice(0, 5).map(a => (<div key={a.symbol} className="flex items-center gap-2"><span className={`w-8 text-xs font-bold ${a.isCrypto ? 'text-orange-400' : 'text-cyan-400'}`}>{a.symbol}</span><div className="flex-1 h-2 bg-slate-700/50 rounded-full overflow-hidden"><div className={`h-full rounded-full ${a.isCrypto ? 'bg-orange-500' : 'bg-cyan-500'}`} style={{ width: `${a.percent}%` }} /></div><span className="text-xs text-slate-400 w-12 text-right">{a.percent.toFixed(1)}%</span></div>))}</div></div>)}
     </div>
   );
 };
 
-// Portfolio Tab Component
 const PortfolioTab = ({ currentUser, holdings, onAddHolding, onRemoveHolding, prices, stocks, cryptos }) => {
   const [showAddModal, setShowAddModal] = useState(false);
-
-  if (!currentUser) {
-    return (
-      <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
-        <Briefcase size={32} className="mx-auto text-slate-600 mb-3" />
-        <h3 className="text-lg font-bold text-white mb-2">Sign in to track your portfolio</h3>
-        <a href="/" className="inline-block px-6 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg font-bold text-sm">Sign In / Sign Up</a>
-      </div>
-    );
-  }
-
+  if (!currentUser) return (<div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center"><Briefcase size={32} className="mx-auto text-slate-600 mb-3" /><h3 className="text-lg font-bold text-white mb-2">Sign in to track your portfolio</h3><a href="/" className="inline-block px-6 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg font-bold text-sm">Sign In / Sign Up</a></div>);
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2"><Briefcase size={20} className="text-purple-400" />My Portfolio</h2>
-        <button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg font-bold text-sm flex items-center gap-2 hover:from-cyan-400 hover:to-purple-400">
-          <Plus size={16} />Add Holding
-        </button>
-      </div>
-      
-      {holdings.length > 0 ? (
-        <>
-          <PortfolioSummary holdings={holdings} prices={prices} />
-          <div className="space-y-3">
-            <h3 className="text-sm font-bold text-slate-400">Holdings ({holdings.length})</h3>
-            {holdings.map(holding => (
-              <HoldingCard key={holding.id} holding={holding} currentPrice={prices[holding.symbol]} onRemove={onRemoveHolding} />
-            ))}
-          </div>
-        </>
-      ) : (
-        <div className="p-8 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
-          <Briefcase size={40} className="mx-auto text-slate-600 mb-3" />
-          <h3 className="text-lg font-bold text-white mb-2">No holdings yet</h3>
-          <p className="text-slate-400 text-sm mb-4">Start tracking your investments by adding your first holding</p>
-          <button onClick={() => setShowAddModal(true)} className="px-6 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg font-bold text-sm">
-            <Plus size={16} className="inline mr-1" />Add Your First Holding
-          </button>
-        </div>
-      )}
-      
+      <div className="flex items-center justify-between"><h2 className="text-lg font-bold text-white flex items-center gap-2"><Briefcase size={20} className="text-purple-400" />My Portfolio</h2><button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg font-bold text-sm flex items-center gap-2 hover:from-cyan-400 hover:to-purple-400"><Plus size={16} />Add Holding</button></div>
+      {holdings.length > 0 ? (<><PortfolioSummary holdings={holdings} prices={prices} /><div className="space-y-3"><h3 className="text-sm font-bold text-slate-400">Holdings ({holdings.length})</h3>{holdings.map(holding => (<HoldingCard key={holding.id} holding={holding} currentPrice={prices[holding.symbol]} onRemove={onRemoveHolding} />))}</div></>) : (<div className="p-8 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center"><Briefcase size={40} className="mx-auto text-slate-600 mb-3" /><h3 className="text-lg font-bold text-white mb-2">No holdings yet</h3><p className="text-slate-400 text-sm mb-4">Start tracking your investments by adding your first holding</p><button onClick={() => setShowAddModal(true)} className="px-6 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg font-bold text-sm"><Plus size={16} className="inline mr-1" />Add Your First Holding</button></div>)}
       <AddHoldingModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onAdd={onAddHolding} stocks={stocks} cryptos={cryptos} />
     </div>
   );
 };
 
-// News Item
+// News Components
 const NewsItem = ({ article, compact = false }) => {
   const openArticle = () => { if (article.url) window.open(article.url, '_blank'); };
-  if (compact) {
-    return (
-      <div onClick={openArticle} className="p-3 bg-slate-800/30 rounded-lg border border-slate-700/50 hover:border-cyan-500/30 cursor-pointer transition-all group">
-        <div className="flex items-start gap-3">
-          {article.image && <img src={article.image} alt="" className="w-16 h-16 rounded-lg object-cover shrink-0" onError={(e) => e.target.style.display = 'none'} />}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-white line-clamp-2 group-hover:text-cyan-400 transition-colors">{article.title}</p>
-            <div className="flex items-center gap-2 mt-1">
-              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${article.type === 'crypto' ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'}`}>{article.type === 'crypto' ? '🪙' : '📈'} {article.symbol || article.type}</span>
-              <span className="text-[10px] text-slate-500">{article.source}</span>
-              <span className="text-[10px] text-slate-500">{formatTimeAgo(article.timestamp)}</span>
-            </div>
-          </div>
-          <ExternalLink size={14} className="text-slate-600 group-hover:text-cyan-400 shrink-0" />
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div onClick={openArticle} className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/50 hover:border-cyan-500/30 cursor-pointer transition-all group">
-      <div className="flex gap-4">
-        {article.image && <img src={article.image} alt="" className="w-24 h-24 rounded-lg object-cover shrink-0" onError={(e) => e.target.style.display = 'none'} />}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-2">
-            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${article.type === 'crypto' ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'}`}>{article.type === 'crypto' ? '🪙 CRYPTO' : '📈 STOCKS'}</span>
-            {article.symbol && <span className="text-xs text-slate-400">${article.symbol}</span>}
-          </div>
-          <h3 className="text-base font-bold text-white mb-2 line-clamp-2 group-hover:text-cyan-400 transition-colors">{article.title}</h3>
-          {article.summary && <p className="text-sm text-slate-400 line-clamp-2 mb-2">{truncateText(article.summary, 150)}</p>}
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-500">{article.source}</span>
-            <span className="text-xs text-slate-500 flex items-center gap-1"><Clock size={10} />{formatTimeAgo(article.timestamp)}</span>
-            <ExternalLink size={12} className="text-slate-600 group-hover:text-cyan-400 ml-auto" />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  if (compact) return (<div onClick={openArticle} className="p-3 bg-slate-800/30 rounded-lg border border-slate-700/50 hover:border-cyan-500/30 cursor-pointer transition-all group"><div className="flex items-start gap-3">{article.image && <img src={article.image} alt="" className="w-16 h-16 rounded-lg object-cover shrink-0" onError={(e) => e.target.style.display = 'none'} />}<div className="flex-1 min-w-0"><p className="text-sm font-semibold text-white line-clamp-2 group-hover:text-cyan-400 transition-colors">{article.title}</p><div className="flex items-center gap-2 mt-1"><span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${article.type === 'crypto' ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'}`}>{article.type === 'crypto' ? '🪙' : '📈'} {article.symbol || article.type}</span><span className="text-[10px] text-slate-500">{article.source}</span><span className="text-[10px] text-slate-500">{formatTimeAgo(article.timestamp)}</span></div></div><ExternalLink size={14} className="text-slate-600 group-hover:text-cyan-400 shrink-0" /></div></div>);
+  return (<div onClick={openArticle} className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/50 hover:border-cyan-500/30 cursor-pointer transition-all group"><div className="flex gap-4">{article.image && <img src={article.image} alt="" className="w-24 h-24 rounded-lg object-cover shrink-0" onError={(e) => e.target.style.display = 'none'} />}<div className="flex-1 min-w-0"><div className="flex items-center gap-2 mb-2"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${article.type === 'crypto' ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'}`}>{article.type === 'crypto' ? '🪙 CRYPTO' : '📈 STOCKS'}</span>{article.symbol && <span className="text-xs text-slate-400">${article.symbol}</span>}</div><h3 className="text-base font-bold text-white mb-2 line-clamp-2 group-hover:text-cyan-400 transition-colors">{article.title}</h3>{article.summary && <p className="text-sm text-slate-400 line-clamp-2 mb-2">{truncateText(article.summary, 150)}</p>}<div className="flex items-center gap-3"><span className="text-xs text-slate-500">{article.source}</span><span className="text-xs text-slate-500 flex items-center gap-1"><Clock size={10} />{formatTimeAgo(article.timestamp)}</span><ExternalLink size={12} className="text-slate-600 group-hover:text-cyan-400 ml-auto" /></div></div></div></div>);
 };
 
 const NewsFeed = ({ news, isLoading, onRefresh, title = "Market News" }) => (
   <div className="space-y-3">
-    <div className="flex items-center justify-between">
-      <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2"><Newspaper size={14} className="text-cyan-400" />{title}</h3>
-      <button onClick={onRefresh} className="p-1 hover:bg-slate-700/50 rounded transition-colors"><RefreshCw size={12} className={`text-slate-400 ${isLoading ? 'animate-spin' : ''}`} /></button>
-    </div>
-    {isLoading ? (
-      <div className="space-y-3">{[1, 2, 3].map(i => (<div key={i} className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/50 animate-pulse"><div className="flex gap-4"><div className="w-24 h-24 bg-slate-700 rounded-lg shrink-0" /><div className="flex-1 space-y-2"><div className="h-4 w-20 bg-slate-700 rounded" /><div className="h-5 w-full bg-slate-700 rounded" /><div className="h-4 w-3/4 bg-slate-700 rounded" /></div></div></div>))}</div>
-    ) : news.length > 0 ? (
-      <div className="space-y-3">{news.map((article, i) => (<NewsItem key={article.id || i} article={article} />))}</div>
-    ) : (
-      <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center"><Newspaper size={24} className="mx-auto text-slate-600 mb-2" /><p className="text-slate-500 text-sm">No news available</p></div>
-    )}
+    <div className="flex items-center justify-between"><h3 className="text-sm font-bold text-slate-300 flex items-center gap-2"><Newspaper size={14} className="text-cyan-400" />{title}</h3><button onClick={onRefresh} className="p-1 hover:bg-slate-700/50 rounded transition-colors"><RefreshCw size={12} className={`text-slate-400 ${isLoading ? 'animate-spin' : ''}`} /></button></div>
+    {isLoading ? (<div className="space-y-3">{[1, 2, 3].map(i => (<div key={i} className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/50 animate-pulse"><div className="flex gap-4"><div className="w-24 h-24 bg-slate-700 rounded-lg shrink-0" /><div className="flex-1 space-y-2"><div className="h-4 w-20 bg-slate-700 rounded" /><div className="h-5 w-full bg-slate-700 rounded" /><div className="h-4 w-3/4 bg-slate-700 rounded" /></div></div></div>))}</div>) : news.length > 0 ? (<div className="space-y-3">{news.map((article, i) => (<NewsItem key={article.id || i} article={article} />))}</div>) : (<div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center"><Newspaper size={24} className="mx-auto text-slate-600 mb-2" /><p className="text-slate-500 text-sm">No news available</p></div>)}
   </div>
 );
 
@@ -407,8 +474,7 @@ const SearchDropdown = ({ query, stockResults, cryptoResults, isLoading, onSelec
   const hasResults = stockResults.length > 0 || cryptoResults.length > 0;
   return (
     <div className="absolute top-full left-0 right-0 mt-2 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden z-50">
-      {isLoading ? (<div className="p-4 flex items-center justify-center gap-2"><Loader size={16} className="animate-spin text-cyan-400" /><span className="text-sm text-slate-400">Searching...</span></div>
-      ) : hasResults ? (
+      {isLoading ? (<div className="p-4 flex items-center justify-center gap-2"><Loader size={16} className="animate-spin text-cyan-400" /><span className="text-sm text-slate-400">Searching...</span></div>) : hasResults ? (
         <div className="max-h-80 overflow-y-auto">
           {stockResults.length > 0 && (<><div className="px-3 py-2 bg-slate-900/50 border-b border-slate-700"><span className="text-[10px] font-bold text-slate-500">STOCKS</span></div>{stockResults.map((stock) => (<button key={stock.symbol} onClick={() => onSelectStock(stock)} className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-700/50 transition-colors border-b border-slate-700/50"><div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold text-sm">{stock.symbol.substring(0, 2)}</div><div className="flex-1 text-left"><p className="font-bold text-white text-sm">{stock.symbol}</p><p className="text-xs text-slate-400 truncate">{stock.name}</p></div><Plus size={16} className="text-slate-500" /></button>))}</>)}
           {cryptoResults.length > 0 && (<><div className="px-3 py-2 bg-slate-900/50 border-b border-slate-700"><span className="text-[10px] font-bold text-orange-400">CRYPTO</span></div>{cryptoResults.map((crypto) => (<button key={crypto.id} onClick={() => onSelectCrypto(crypto)} className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-700/50 transition-colors border-b border-slate-700/50"><div className="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center">{crypto.image ? <img src={crypto.image} alt={crypto.symbol} className="w-6 h-6 rounded-full" /> : <span className="text-orange-400 font-bold">{CRYPTO_ICONS[crypto.symbol] || crypto.symbol.substring(0, 2)}</span>}</div><div className="flex-1 text-left"><p className="font-bold text-white text-sm">{crypto.symbol}</p><p className="text-xs text-slate-400 truncate">{crypto.name}</p></div><span className="text-[10px] text-orange-400 bg-orange-500/20 px-2 py-0.5 rounded">CRYPTO</span></button>))}</>)}
@@ -429,10 +495,7 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
   return (
     <div onClick={() => onSelect(stock)} className={`relative group p-4 rounded-xl border transition-all duration-300 cursor-pointer overflow-hidden ${isSelected ? 'bg-cyan-500/10 border-cyan-500/50 shadow-lg shadow-cyan-500/20' : 'bg-slate-800/30 border-slate-700/50 hover:border-cyan-500/30'}`}>
       <div className="relative">
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-center gap-2"><div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold ${change >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>{stock.ticker.substring(0, 2)}</div><div><h4 className="font-bold text-white text-sm">{stock.ticker}</h4><p className="text-[10px] text-slate-400 truncate max-w-[100px]">{stock.name}</p></div></div>
-          <button onClick={handleWatchlistToggle} disabled={isAdding} className={`p-1.5 rounded-lg transition-all ${isInWatchlist ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700/50 text-slate-400 hover:text-amber-400'}`}>{isAdding ? <RefreshCw size={14} className="animate-spin" /> : <Star size={14} className={isInWatchlist ? 'fill-amber-400' : ''} />}</button>
-        </div>
+        <div className="flex items-start justify-between mb-3"><div className="flex items-center gap-2"><div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold ${change >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>{stock.ticker.substring(0, 2)}</div><div><h4 className="font-bold text-white text-sm">{stock.ticker}</h4><p className="text-[10px] text-slate-400 truncate max-w-[100px]">{stock.name}</p></div></div><button onClick={handleWatchlistToggle} disabled={isAdding} className={`p-1.5 rounded-lg transition-all ${isInWatchlist ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700/50 text-slate-400 hover:text-amber-400'}`}>{isAdding ? <RefreshCw size={14} className="animate-spin" /> : <Star size={14} className={isInWatchlist ? 'fill-amber-400' : ''} />}</button></div>
         <div className="flex items-end justify-between mb-3"><div>{isLoading ? (<div className="animate-pulse"><div className="h-6 w-20 bg-slate-700 rounded mb-1"></div><div className="h-4 w-14 bg-slate-700 rounded"></div></div>) : (<><p className="text-xl font-bold font-mono text-white">${price.toFixed(2)}</p><div className={`flex items-center gap-1 ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{change >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}<span className="text-xs font-mono">{change >= 0 ? '+' : ''}{change.toFixed(2)}%</span></div></>)}</div><SentimentMeter score={stock.sentiment || 50} size="sm" /></div>
         <div className="flex items-center gap-2"><button onClick={(e) => handleVote('up', e)} disabled={isVoting} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${userVote === 'bullish' ? 'bg-emerald-500 text-white' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}><ThumbsUp size={12} className={userVote === 'bullish' ? 'fill-white' : ''} /><span className="text-xs font-bold">{localVotes.up.toLocaleString()}</span></button><button onClick={(e) => handleVote('down', e)} disabled={isVoting} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${userVote === 'bearish' ? 'bg-rose-500 text-white' : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'}`}><ThumbsDown size={12} className={userVote === 'bearish' ? 'fill-white' : ''} /><span className="text-xs font-bold">{localVotes.down.toLocaleString()}</span></button></div>
         <div className="mt-2 h-1 bg-slate-700/50 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all" style={{ width: `${bullishPercent}%` }} /></div>
@@ -454,10 +517,7 @@ const CryptoCard = ({ crypto, onSelect, isSelected, isInWatchlist, onToggleWatch
     <div onClick={() => onSelect(crypto)} className={`relative group p-4 rounded-xl border transition-all duration-300 cursor-pointer overflow-hidden ${isSelected ? 'bg-orange-500/10 border-orange-500/50 shadow-lg shadow-orange-500/20' : 'bg-slate-800/30 border-slate-700/50 hover:border-orange-500/30'}`}>
       <div className="relative">
         <div className="absolute top-0 right-0 px-1.5 py-0.5 bg-orange-500/20 rounded text-[9px] font-bold text-orange-400">CRYPTO</div>
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-center gap-2"><div className={`w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden ${change >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>{crypto.image ? <img src={crypto.image} alt={crypto.symbol} className="w-7 h-7 rounded-full" /> : <span className={`text-lg font-bold ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{CRYPTO_ICONS[crypto.symbol] || crypto.symbol.substring(0, 2)}</span>}</div><div><h4 className="font-bold text-white text-sm">{crypto.symbol}</h4><p className="text-[10px] text-slate-400 truncate max-w-[100px]">{crypto.name}</p></div></div>
-          <button onClick={handleWatchlistToggle} disabled={isAdding} className={`p-1.5 rounded-lg transition-all mt-4 ${isInWatchlist ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700/50 text-slate-400 hover:text-amber-400'}`}>{isAdding ? <RefreshCw size={14} className="animate-spin" /> : <Star size={14} className={isInWatchlist ? 'fill-amber-400' : ''} />}</button>
-        </div>
+        <div className="flex items-start justify-between mb-3"><div className="flex items-center gap-2"><div className={`w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden ${change >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>{crypto.image ? <img src={crypto.image} alt={crypto.symbol} className="w-7 h-7 rounded-full" /> : <span className={`text-lg font-bold ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{CRYPTO_ICONS[crypto.symbol] || crypto.symbol.substring(0, 2)}</span>}</div><div><h4 className="font-bold text-white text-sm">{crypto.symbol}</h4><p className="text-[10px] text-slate-400 truncate max-w-[100px]">{crypto.name}</p></div></div><button onClick={handleWatchlistToggle} disabled={isAdding} className={`p-1.5 rounded-lg transition-all mt-4 ${isInWatchlist ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700/50 text-slate-400 hover:text-amber-400'}`}>{isAdding ? <RefreshCw size={14} className="animate-spin" /> : <Star size={14} className={isInWatchlist ? 'fill-amber-400' : ''} />}</button></div>
         <div className="flex items-end justify-between mb-3"><div>{isLoading ? (<div className="animate-pulse"><div className="h-6 w-20 bg-slate-700 rounded mb-1"></div><div className="h-4 w-14 bg-slate-700 rounded"></div></div>) : (<><p className="text-xl font-bold font-mono text-white">{formatCryptoPrice(crypto.price)}</p><div className={`flex items-center gap-1 ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{change >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}<span className="text-xs font-mono">{change >= 0 ? '+' : ''}{change.toFixed(2)}%</span></div></>)}</div><div className="text-right"><p className="text-[10px] text-slate-500">MCap</p><p className="text-xs font-mono text-slate-400">{formatMarketCap(crypto.marketCap)}</p></div></div>
         <div className="flex items-center gap-2"><button onClick={(e) => handleVote('up', e)} disabled={isVoting} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${userVote === 'bullish' ? 'bg-emerald-500 text-white' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}><ThumbsUp size={12} className={userVote === 'bullish' ? 'fill-white' : ''} /><span className="text-xs font-bold">{localVotes.up.toLocaleString()}</span></button><button onClick={(e) => handleVote('down', e)} disabled={isVoting} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${userVote === 'bearish' ? 'bg-rose-500 text-white' : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'}`}><ThumbsDown size={12} className={userVote === 'bearish' ? 'fill-white' : ''} /><span className="text-xs font-bold">{localVotes.down.toLocaleString()}</span></button></div>
         <div className="mt-2 h-1 bg-slate-700/50 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all" style={{ width: `${bullishPercent}%` }} /></div>
@@ -546,9 +606,12 @@ export default function Finnysights() {
   const [itemNews, setItemNews] = useState([]);
   const [isLoadingItemNews, setIsLoadingItemNews] = useState(false);
   
-  // Portfolio state
   const [portfolio, setPortfolio] = useState([]);
   const [portfolioPrices, setPortfolioPrices] = useState({});
+  
+  // Alerts state
+  const [alerts, setAlerts] = useState([]);
+  const [triggeredAlert, setTriggeredAlert] = useState(null);
 
   const fetchNews = useCallback(async () => { setIsLoadingNews(true); const newsData = await getCombinedNews(); setNews(newsData); setIsLoadingNews(false); }, []);
   const fetchItemNews = useCallback(async (symbol, isCrypto) => { setIsLoadingItemNews(true); let newsData; if (isCrypto) { newsData = await getCryptoNewsBySymbol(symbol); } else { newsData = await getStockNews(symbol); } setItemNews(newsData || []); setIsLoadingItemNews(false); }, []);
@@ -560,31 +623,54 @@ export default function Finnysights() {
   const handleAddComment = async (symbol, content) => { if (!currentUser) return; await addComment(currentUser.uid, symbol, content); };
   const handleFollow = async (targetUid) => { if (!currentUser) return; const isCurrentlyFollowing = userProfile?.following?.includes(targetUid); if (isCurrentlyFollowing) await unfollowUser(currentUser.uid, targetUid); else await followUser(currentUser.uid, targetUid); const updatedProfile = await getUserProfile(currentUser.uid); setUserProfile(updatedProfile); fetchLeaderboard(); };
 
-  // Portfolio functions
-  const fetchPortfolio = useCallback(async () => {
-    if (!currentUser) return;
-    const portfolioData = await getPortfolio(currentUser.uid);
-    setPortfolio(portfolioData || []);
-  }, [currentUser]);
+  const fetchPortfolio = useCallback(async () => { if (!currentUser) return; const portfolioData = await getPortfolio(currentUser.uid); setPortfolio(portfolioData || []); }, [currentUser]);
+  const updatePortfolioPrices = useCallback(() => { const prices = {}; stocks.forEach(s => { if (s.price) prices[s.ticker] = s.price; }); cryptos.forEach(c => { if (c.price) prices[c.symbol] = c.price; }); setPortfolioPrices(prices); }, [stocks, cryptos]);
+  const handleAddHolding = async (holding) => { if (!currentUser) return; const result = await addHolding(currentUser.uid, holding); if (result) setPortfolio(prev => [...prev, result]); };
+  const handleRemoveHolding = async (holdingId) => { if (!currentUser) return; const success = await removeHolding(currentUser.uid, holdingId); if (success) setPortfolio(prev => prev.filter(h => h.id !== holdingId)); };
 
-  const updatePortfolioPrices = useCallback(() => {
-    const prices = {};
-    stocks.forEach(s => { if (s.price) prices[s.ticker] = s.price; });
-    cryptos.forEach(c => { if (c.price) prices[c.symbol] = c.price; });
-    setPortfolioPrices(prices);
-  }, [stocks, cryptos]);
-
-  const handleAddHolding = async (holding) => {
+  // Alert functions
+  const handleAddAlert = async (alert) => {
     if (!currentUser) return;
-    const result = await addHolding(currentUser.uid, holding);
-    if (result) setPortfolio(prev => [...prev, result]);
+    const success = await addPriceAlert(currentUser.uid, alert);
+    if (success) {
+      const profile = await getUserProfile(currentUser.uid);
+      setAlerts(profile?.alerts || []);
+    }
   };
 
-  const handleRemoveHolding = async (holdingId) => {
+  const handleRemoveAlert = async (alertId) => {
     if (!currentUser) return;
-    const success = await removeHolding(currentUser.uid, holdingId);
-    if (success) setPortfolio(prev => prev.filter(h => h.id !== holdingId));
+    const success = await removePriceAlert(currentUser.uid, alertId);
+    if (success) setAlerts(prev => prev.filter(a => a.id !== alertId));
   };
+
+  // Check alerts when prices update
+  const checkAlerts = useCallback(() => {
+    if (!alerts.length) return;
+    
+    alerts.forEach(alert => {
+      if (alert.triggered) return;
+      
+      const currentPrice = portfolioPrices[alert.symbol];
+      if (!currentPrice) return;
+      
+      const isTriggered = alert.condition === 'above' 
+        ? currentPrice >= alert.targetPrice 
+        : currentPrice <= alert.targetPrice;
+      
+      if (isTriggered) {
+        setTriggeredAlert({ ...alert, currentPrice });
+        // Play sound
+        try {
+          const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2teleEg4Y5mxoX1UPTxkgqCtgE42PGB8oK+DWTs+Z4SssoRaOkNqjbS5hFo+Q2qItrqGXEJDbIq3u4teQkRsjbe7il5DRW6Nur2MYENFb466vY5iREZwj7y+kGRFRnKRvb+TZkdIc5O/wJZpSEl1lb/Al2pJSnWWwMGZbEpLd5fBwpttS0x4mcPDnW9MTXqaw8SfcU1OepvExKByTk97nMXFoXNPUHydxsajdFBRfZ7Hx6V2UVJ+n8jIpndSU3+gycmpeFNUgKHJyat6VFWBosrKrHtVVoKjy8utfFZXg6TLy658V1iEpcvMsH5YWYWmzM2xf1lZhqfNzbOAWlqHp87Os4FbW4iozs+0gl1ciajOz7WDXl2Kqc/QtIReXoqq0NC1hV9fi6vQ0baGYGCMq9DRt4dhYI2s0dK4iGJhjqzR0rmJY2KOrNHTuopkY4+t0tS7i2VkjqJkZw==');
+          audio.volume = 0.3;
+          audio.play();
+        } catch (e) {}
+      }
+    });
+  }, [alerts, portfolioPrices]);
+
+  useEffect(() => { checkAlerts(); }, [portfolioPrices, checkAlerts]);
 
   useEffect(() => { const handleClickOutside = (e) => { if (searchRef.current && !searchRef.current.contains(e.target)) setShowSearchDropdown(false); }; document.addEventListener('mousedown', handleClickOutside); return () => document.removeEventListener('mousedown', handleClickOutside); }, []);
   useEffect(() => { if (searchQuery.length < 2) { setStockSearchResults([]); setCryptoSearchResults([]); setShowSearchDropdown(false); return; } if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); searchTimeoutRef.current = setTimeout(async () => { setIsSearching(true); setShowSearchDropdown(true); const [stockResults, cryptoResults] = await Promise.all([searchStocks(searchQuery), searchCrypto(searchQuery)]); setStockSearchResults(stockResults); setCryptoSearchResults(cryptoResults); setIsSearching(false); }, 300); return () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); }; }, [searchQuery]);
@@ -605,8 +691,9 @@ export default function Finnysights() {
         const userWatchlist = await getWatchlist(user.uid); setWatchlist(userWatchlist || []);
         const votes = await getUserVotes(user.uid); setUserVotes(votes || {});
         const portfolioData = await getPortfolio(user.uid); setPortfolio(portfolioData || []);
+        setAlerts(profile?.alerts || []);
         setIsLoadingWatchlist(false);
-      } else { setUserProfile(null); setWatchlist([]); setUserVotes({}); setPortfolio([]); }
+      } else { setUserProfile(null); setWatchlist([]); setUserVotes({}); setPortfolio([]); setAlerts([]); }
     });
     return () => unsubscribe();
   }, []);
@@ -623,6 +710,15 @@ export default function Finnysights() {
     <div className="min-h-screen bg-slate-950 text-white overflow-hidden">
       <AnimatedBackground />
       <style>{`@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@400;600;700;900&display=swap'); * { font-family: 'Outfit', sans-serif; } .font-mono { font-family: 'JetBrains Mono', monospace; } @keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(1); } 50% { opacity: 1; transform: scale(1.5); } } @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } } .animate-slideIn { animation: slideIn 0.5s ease-out forwards; } .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }`}</style>
+      
+      {/* Alert Toast */}
+      {triggeredAlert && (
+        <AlertToast 
+          alert={triggeredAlert} 
+          currentPrice={triggeredAlert.currentPrice}
+          onDismiss={() => setTriggeredAlert(null)} 
+        />
+      )}
       
       <header className="relative z-10 border-b border-slate-800/50 bg-slate-900/50 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-4 py-3">
@@ -653,10 +749,12 @@ export default function Finnysights() {
               <button onClick={() => setActiveTab('stocks')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'stocks' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}><TrendingUp size={14} />Stocks</button>
               <button onClick={() => setActiveTab('crypto')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'crypto' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}><Bitcoin size={14} />Crypto</button>
               <button onClick={() => setActiveTab('portfolio')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'portfolio' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}><Briefcase size={14} />Portfolio</button>
+              <button onClick={() => setActiveTab('alerts')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'alerts' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}><Bell size={14} />Alerts{alerts.filter(a => !a.triggered).length > 0 ? ` (${alerts.filter(a => !a.triggered).length})` : ''}</button>
               <button onClick={() => setActiveTab('news')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'news' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}><Newspaper size={14} />News</button>
-              <button onClick={() => setActiveTab('watchlist')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'watchlist' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}><Star size={14} />Watchlist{watchlist.length > 0 ? ` (${watchlist.length})` : ''}</button>
+              <button onClick={() => setActiveTab('watchlist')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'watchlist' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}><Star size={14} />Watchlist{watchlist.length > 0 ? ` (${watchlist.length})` : ''}</button>
             </div>
             
+            {activeTab === 'alerts' && <AlertsTab currentUser={currentUser} alerts={alerts} onAddAlert={handleAddAlert} onRemoveAlert={handleRemoveAlert} prices={portfolioPrices} stocks={stocks} cryptos={cryptos} />}
             {activeTab === 'portfolio' && <PortfolioTab currentUser={currentUser} holdings={portfolio} onAddHolding={handleAddHolding} onRemoveHolding={handleRemoveHolding} prices={portfolioPrices} stocks={stocks} cryptos={cryptos} />}
             {activeTab === 'news' && <NewsFeed news={news} isLoading={isLoadingNews} onRefresh={fetchNews} title="Latest Market News" />}
             {activeTab === 'watchlist' && !currentUser && (<div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center"><Star size={32} className="mx-auto text-slate-600 mb-3" /><h3 className="text-lg font-bold text-white mb-2">Sign in to use Watchlist</h3><a href="/" className="inline-block px-6 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg font-bold text-sm">Sign In / Sign Up</a></div>)}

@@ -34,6 +34,115 @@ const EXCHANGES = [
   { id: 'tse', name: 'TSE', country: 'JP', flag: '🇯🇵', status: 'closed', change: 1.24 },
 ];
 
+// Market Hours Helper
+const getMarketStatus = () => {
+  const now = new Date();
+  const etOptions = { timeZone: 'America/New_York' };
+  const etString = now.toLocaleString('en-US', etOptions);
+  const etDate = new Date(etString);
+  
+  const day = etDate.getDay(); // 0 = Sunday, 6 = Saturday
+  const hours = etDate.getHours();
+  const minutes = etDate.getMinutes();
+  const currentMinutes = hours * 60 + minutes;
+  
+  const marketOpen = 9 * 60 + 30; // 9:30 AM ET
+  const marketClose = 16 * 60; // 4:00 PM ET
+  
+  const isWeekend = day === 0 || day === 6;
+  const isMarketHours = currentMinutes >= marketOpen && currentMinutes < marketClose;
+  const isOpen = !isWeekend && isMarketHours;
+  
+  // Calculate next market event
+  let nextEventTime;
+  let nextEventLabel;
+  
+  if (isOpen) {
+    // Market is open - countdown to close
+    nextEventLabel = 'closes';
+    const closeToday = new Date(etDate);
+    closeToday.setHours(16, 0, 0, 0);
+    nextEventTime = closeToday;
+  } else {
+    // Market is closed - countdown to open
+    nextEventLabel = 'opens';
+    let nextOpen = new Date(etDate);
+    
+    if (day === 6) {
+      // Saturday - next open is Monday
+      nextOpen.setDate(nextOpen.getDate() + 2);
+    } else if (day === 0) {
+      // Sunday - next open is Monday
+      nextOpen.setDate(nextOpen.getDate() + 1);
+    } else if (currentMinutes >= marketClose) {
+      // After hours - next open is tomorrow (or Monday if Friday)
+      if (day === 5) {
+        nextOpen.setDate(nextOpen.getDate() + 3); // Friday after hours -> Monday
+      } else {
+        nextOpen.setDate(nextOpen.getDate() + 1);
+      }
+    }
+    // If before market open on a weekday, nextOpen is today
+    
+    nextOpen.setHours(9, 30, 0, 0);
+    nextEventTime = nextOpen;
+  }
+  
+  // Calculate time difference
+  const etNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const diff = nextEventTime - etNow;
+  
+  const totalSeconds = Math.max(0, Math.floor(diff / 1000));
+  const hoursLeft = Math.floor(totalSeconds / 3600);
+  const minutesLeft = Math.floor((totalSeconds % 3600) / 60);
+  const secondsLeft = totalSeconds % 60;
+  
+  return {
+    isOpen,
+    nextEventLabel,
+    hours: hoursLeft,
+    minutes: minutesLeft,
+    seconds: secondsLeft,
+    etTime: etDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/New_York' })
+  };
+};
+
+// Market Countdown Component
+const MarketCountdown = () => {
+  const [status, setStatus] = useState(getMarketStatus());
+  
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setStatus(getMarketStatus());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+  
+  const formatTime = (h, m, s) => {
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+  
+  return (
+    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${status.isOpen ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-slate-800/50 border-slate-700/50'}`}>
+      <div className="flex items-center gap-1.5">
+        <div className={`w-2 h-2 rounded-full ${status.isOpen ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+        <span className="text-xs font-bold text-white">US Market</span>
+      </div>
+      <div className="flex flex-col items-end">
+        <span className={`text-[10px] ${status.isOpen ? 'text-emerald-400' : 'text-slate-400'}`}>
+          {status.isOpen ? 'OPEN' : 'CLOSED'}
+        </span>
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-slate-500">{status.nextEventLabel} in</span>
+          <span className={`font-mono text-xs font-bold ${status.isOpen ? 'text-amber-400' : 'text-cyan-400'}`}>
+            {formatTime(status.hours, status.minutes, status.seconds)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const CRYPTO_ICONS = { BTC: '₿', ETH: 'Ξ', BNB: '◆', SOL: '◎', XRP: '✕', ADA: '₳', DOGE: 'Ð', DOT: '●', MATIC: '⬡', LTC: 'Ł' };
 const AVATARS = ['👨‍💼', '👩‍💼', '🧑‍💻', '👨‍🚀', '🦊', '🐺', '🦁', '🐯', '🦅', '🐋', '🎯', '📊', '💹', '🚀'];
 const getAvatar = (uid) => AVATARS[uid?.charCodeAt(0) % AVATARS.length] || '👤';
@@ -728,6 +837,7 @@ export default function Finnysights() {
             <div className="flex items-center gap-3">
               <a href="/" className="flex items-center gap-2"><div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-xl flex items-center justify-center shadow-lg shadow-cyan-500/20"><ThumbsUpLogo size={22} className="text-white" /></div><span className="text-xl font-black tracking-tight hidden sm:block">finnysights</span></a>
               <div className="hidden md:flex items-center gap-2 ml-4 px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50"><Clock size={14} className="text-cyan-400" /><span className="font-mono text-sm text-slate-300">{time.toLocaleTimeString('en-US', { hour12: false })}</span><div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-rose-400'}`} /></div>
+              <div className="hidden lg:block"><MarketCountdown /></div>
             </div>
             <div className="flex-1 max-w-md mx-4 relative" ref={searchRef}>
               <div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" /><input type="text" placeholder="Search stocks or crypto..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onFocus={() => searchQuery.length >= 2 && setShowSearchDropdown(true)} className="w-full pl-10 pr-4 py-2.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50" />{searchQuery && <button onClick={() => { setSearchQuery(''); setShowSearchDropdown(false); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"><X size={14} /></button>}</div>

@@ -1,21 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, Search, Globe, BarChart3, MessageSquare, Users, Zap, ChevronRight, Star, Clock, Volume2, Eye, Filter, Bell, Settings, RefreshCw, Activity, Plus, X, Check, Heart, Trash2, LogOut, Wifi, WifiOff, Loader, Send, Trophy, UserPlus, UserMinus, Target, Flame, Award, Bitcoin } from 'lucide-react';
+import { TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, Search, Globe, BarChart3, MessageSquare, Users, Zap, ChevronRight, Star, Clock, Volume2, Eye, Filter, Bell, Settings, RefreshCw, Activity, Plus, X, Check, Heart, Trash2, LogOut, Wifi, WifiOff, Loader, Send, Trophy, UserPlus, Target, Flame, Award, Bitcoin, Newspaper, ExternalLink } from 'lucide-react';
 import { auth } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { addToWatchlist, removeFromWatchlist, getWatchlist, recordVote, removeVote, getUserVotes, getUserProfile, addComment, getStockComments, likeComment, unlikeComment, getTopTraders, followUser, unfollowUser, checkPredictionAccuracy } from './firestore.js';
+import { addToWatchlist, removeFromWatchlist, getWatchlist, recordVote, removeVote, getUserVotes, getUserProfile, addComment, getStockComments, likeComment, unlikeComment, getTopTraders, followUser, unfollowUser } from './firestore.js';
 import { getMultipleQuotes, getQuote, searchStocks } from './stockApi.js';
 import { getCryptoMarketData, searchCrypto, formatCryptoPrice, formatMarketCap } from './cryptoApi.js';
+import { getCombinedNews, getStockNews, getCryptoNewsBySymbol, formatTimeAgo, truncateText } from './newsApi.js';
 
 // Thumbs Up Logo Component
 const ThumbsUpLogo = ({ size = 22, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
-    <path 
-      d="M7 22V11M2 13V20C2 21.1046 2.89543 22 4 22H17.4262C18.907 22 20.1662 20.9197 20.3914 19.4562L21.4683 12.4562C21.7479 10.6389 20.3418 9 18.5032 9H15C14.4477 9 14 8.55228 14 8V4.46584C14 3.10399 12.896 2 11.5342 2C11.2093 2 10.915 2.1913 10.7831 2.48812L7.26394 10.4061C7.10344 10.7673 6.74532 11 6.35013 11H4C2.89543 11 2 11.8954 2 13Z" 
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
+    <path d="M7 22V11M2 13V20C2 21.1046 2.89543 22 4 22H17.4262C18.907 22 20.1662 20.9197 20.3914 19.4562L21.4683 12.4562C21.7479 10.6389 20.3418 9 18.5032 9H15C14.4477 9 14 8.55228 14 8V4.46584C14 3.10399 12.896 2 11.5342 2C11.2093 2 10.915 2.1913 10.7831 2.48812L7.26394 10.4061C7.10344 10.7673 6.74532 11 6.35013 11H4C2.89543 11 2 11.8954 2 13Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 );
 
@@ -36,25 +31,9 @@ const EXCHANGES = [
   { id: 'nasdaq', name: 'NASDAQ', country: 'US', flag: '🇺🇸', status: 'open', change: 0.67 },
   { id: 'binance', name: 'Binance', country: 'CRYPTO', flag: '🪙', status: 'open', change: 1.24 },
   { id: 'coinbase', name: 'Coinbase', country: 'CRYPTO', flag: '🪙', status: 'open', change: 0.89 },
-  { id: 'lse', name: 'LSE', country: 'UK', flag: '🇬🇧', status: 'closed', change: -0.12 },
-  { id: 'tse', name: 'TSE', country: 'JP', flag: '🇯🇵', status: 'closed', change: 1.24 },
 ];
 
-// Crypto icons mapping
-const CRYPTO_ICONS = {
-  BTC: '₿',
-  ETH: 'Ξ',
-  BNB: '◆',
-  SOL: '◎',
-  XRP: '✕',
-  ADA: '₳',
-  DOGE: 'Ð',
-  DOT: '●',
-  MATIC: '⬡',
-  LTC: 'Ł',
-};
-
-// Avatars for users
+const CRYPTO_ICONS = { BTC: '₿', ETH: 'Ξ', BNB: '◆', SOL: '◎', XRP: '✕', ADA: '₳', DOGE: 'Ð', DOT: '●', MATIC: '⬡', LTC: 'Ł' };
 const AVATARS = ['👨‍💼', '👩‍💼', '🧑‍💻', '👨‍🚀', '🦊', '🐺', '🦁', '🐯', '🦅', '🐋', '🎯', '📊', '💹', '🚀'];
 const getAvatar = (uid) => AVATARS[uid?.charCodeAt(0) % AVATARS.length] || '👤';
 
@@ -113,7 +92,109 @@ const SentimentMeter = ({ score, size = 'md' }) => {
   );
 };
 
-// Search dropdown (unified for stocks and crypto)
+// News Item Component
+const NewsItem = ({ article, compact = false }) => {
+  const openArticle = () => {
+    if (article.url) window.open(article.url, '_blank');
+  };
+
+  if (compact) {
+    return (
+      <div onClick={openArticle} className="p-3 bg-slate-800/30 rounded-lg border border-slate-700/50 hover:border-cyan-500/30 cursor-pointer transition-all group">
+        <div className="flex items-start gap-3">
+          {article.image && (
+            <img src={article.image} alt="" className="w-16 h-16 rounded-lg object-cover shrink-0" onError={(e) => e.target.style.display = 'none'} />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-white line-clamp-2 group-hover:text-cyan-400 transition-colors">{article.title}</p>
+            <div className="flex items-center gap-2 mt-1">
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${article.type === 'crypto' ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
+                {article.type === 'crypto' ? '🪙' : '📈'} {article.symbol || article.type}
+              </span>
+              <span className="text-[10px] text-slate-500">{article.source}</span>
+              <span className="text-[10px] text-slate-600">•</span>
+              <span className="text-[10px] text-slate-500">{formatTimeAgo(article.timestamp)}</span>
+            </div>
+          </div>
+          <ExternalLink size={14} className="text-slate-600 group-hover:text-cyan-400 shrink-0" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div onClick={openArticle} className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/50 hover:border-cyan-500/30 cursor-pointer transition-all group">
+      <div className="flex gap-4">
+        {article.image && (
+          <img src={article.image} alt="" className="w-24 h-24 rounded-lg object-cover shrink-0" onError={(e) => e.target.style.display = 'none'} />
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-2">
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${article.type === 'crypto' ? 'bg-orange-500/20 text-orange-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
+              {article.type === 'crypto' ? '🪙 CRYPTO' : '📈 STOCKS'}
+            </span>
+            {article.symbol && <span className="text-xs text-slate-400">${article.symbol}</span>}
+          </div>
+          <h3 className="text-base font-bold text-white mb-2 line-clamp-2 group-hover:text-cyan-400 transition-colors">{article.title}</h3>
+          {article.summary && <p className="text-sm text-slate-400 line-clamp-2 mb-2">{truncateText(article.summary, 150)}</p>}
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-500">{article.source}</span>
+            <span className="text-xs text-slate-600">•</span>
+            <span className="text-xs text-slate-500 flex items-center gap-1">
+              <Clock size={10} />{formatTimeAgo(article.timestamp)}
+            </span>
+            <ExternalLink size={12} className="text-slate-600 group-hover:text-cyan-400 ml-auto" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// News Feed Component
+const NewsFeed = ({ news, isLoading, onRefresh, compact = false, title = "Market News" }) => (
+  <div className="space-y-3">
+    <div className="flex items-center justify-between">
+      <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2">
+        <Newspaper size={14} className="text-cyan-400" />
+        {title}
+      </h3>
+      <button onClick={onRefresh} className="p-1 hover:bg-slate-700/50 rounded transition-colors">
+        <RefreshCw size={12} className={`text-slate-400 ${isLoading ? 'animate-spin' : ''}`} />
+      </button>
+    </div>
+    
+    {isLoading ? (
+      <div className="space-y-3">
+        {[1, 2, 3].map(i => (
+          <div key={i} className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/50 animate-pulse">
+            <div className="flex gap-4">
+              <div className="w-24 h-24 bg-slate-700 rounded-lg shrink-0" />
+              <div className="flex-1 space-y-2">
+                <div className="h-4 w-20 bg-slate-700 rounded" />
+                <div className="h-5 w-full bg-slate-700 rounded" />
+                <div className="h-4 w-3/4 bg-slate-700 rounded" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    ) : news.length > 0 ? (
+      <div className="space-y-3">
+        {news.map((article, i) => (
+          <NewsItem key={article.id || i} article={article} compact={compact} />
+        ))}
+      </div>
+    ) : (
+      <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
+        <Newspaper size={24} className="mx-auto text-slate-600 mb-2" />
+        <p className="text-slate-500 text-sm">No news available</p>
+      </div>
+    )}
+  </div>
+);
+
+// Search dropdown
 const SearchDropdown = ({ query, stockResults, cryptoResults, isLoading, onSelectStock, onSelectCrypto }) => {
   if (!query || query.length < 1) return null;
   const hasResults = stockResults.length > 0 || cryptoResults.length > 0;
@@ -127,48 +208,27 @@ const SearchDropdown = ({ query, stockResults, cryptoResults, isLoading, onSelec
         </div>
       ) : hasResults ? (
         <div className="max-h-80 overflow-y-auto">
-          {/* Stocks section */}
           {stockResults.length > 0 && (
             <>
-              <div className="px-3 py-2 bg-slate-900/50 border-b border-slate-700">
-                <span className="text-[10px] font-bold text-slate-500">STOCKS</span>
-              </div>
+              <div className="px-3 py-2 bg-slate-900/50 border-b border-slate-700"><span className="text-[10px] font-bold text-slate-500">STOCKS</span></div>
               {stockResults.map((stock) => (
-                <button key={stock.symbol} onClick={() => onSelectStock(stock)}
-                  className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-700/50 transition-colors border-b border-slate-700/50">
-                  <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold text-sm">
-                    {stock.symbol.substring(0, 2)}
-                  </div>
-                  <div className="flex-1 text-left">
-                    <p className="font-bold text-white text-sm">{stock.symbol}</p>
-                    <p className="text-xs text-slate-400 truncate">{stock.name}</p>
-                  </div>
+                <button key={stock.symbol} onClick={() => onSelectStock(stock)} className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-700/50 transition-colors border-b border-slate-700/50">
+                  <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold text-sm">{stock.symbol.substring(0, 2)}</div>
+                  <div className="flex-1 text-left"><p className="font-bold text-white text-sm">{stock.symbol}</p><p className="text-xs text-slate-400 truncate">{stock.name}</p></div>
                   <Plus size={16} className="text-slate-500" />
                 </button>
               ))}
             </>
           )}
-          
-          {/* Crypto section */}
           {cryptoResults.length > 0 && (
             <>
-              <div className="px-3 py-2 bg-slate-900/50 border-b border-slate-700">
-                <span className="text-[10px] font-bold text-orange-400">CRYPTO</span>
-              </div>
+              <div className="px-3 py-2 bg-slate-900/50 border-b border-slate-700"><span className="text-[10px] font-bold text-orange-400">CRYPTO</span></div>
               {cryptoResults.map((crypto) => (
-                <button key={crypto.id} onClick={() => onSelectCrypto(crypto)}
-                  className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-700/50 transition-colors border-b border-slate-700/50">
+                <button key={crypto.id} onClick={() => onSelectCrypto(crypto)} className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-700/50 transition-colors border-b border-slate-700/50">
                   <div className="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center">
-                    {crypto.image ? (
-                      <img src={crypto.image} alt={crypto.symbol} className="w-6 h-6 rounded-full" />
-                    ) : (
-                      <span className="text-orange-400 font-bold">{CRYPTO_ICONS[crypto.symbol] || crypto.symbol.substring(0, 2)}</span>
-                    )}
+                    {crypto.image ? <img src={crypto.image} alt={crypto.symbol} className="w-6 h-6 rounded-full" /> : <span className="text-orange-400 font-bold">{CRYPTO_ICONS[crypto.symbol] || crypto.symbol.substring(0, 2)}</span>}
                   </div>
-                  <div className="flex-1 text-left">
-                    <p className="font-bold text-white text-sm">{crypto.symbol}</p>
-                    <p className="text-xs text-slate-400 truncate">{crypto.name}</p>
-                  </div>
+                  <div className="flex-1 text-left"><p className="font-bold text-white text-sm">{crypto.symbol}</p><p className="text-xs text-slate-400 truncate">{crypto.name}</p></div>
                   <span className="text-[10px] text-orange-400 bg-orange-500/20 px-2 py-0.5 rounded">CRYPTO</span>
                 </button>
               ))}
@@ -176,9 +236,7 @@ const SearchDropdown = ({ query, stockResults, cryptoResults, isLoading, onSelec
           )}
         </div>
       ) : (
-        <div className="p-4 text-center">
-          <p className="text-sm text-slate-400">No results found for "{query}"</p>
-        </div>
+        <div className="p-4 text-center"><p className="text-sm text-slate-400">No results found for "{query}"</p></div>
       )}
     </div>
   );
@@ -229,76 +287,46 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
   const change = stock.change || 0;
 
   return (
-    <div onClick={() => onSelect(stock)}
-      className={`relative group p-4 rounded-xl border transition-all duration-300 cursor-pointer overflow-hidden ${
-        isSelected ? 'bg-cyan-500/10 border-cyan-500/50 shadow-lg shadow-cyan-500/20' : 'bg-slate-800/30 border-slate-700/50 hover:border-cyan-500/30'
-      }`}>
+    <div onClick={() => onSelect(stock)} className={`relative group p-4 rounded-xl border transition-all duration-300 cursor-pointer overflow-hidden ${isSelected ? 'bg-cyan-500/10 border-cyan-500/50 shadow-lg shadow-cyan-500/20' : 'bg-slate-800/30 border-slate-700/50 hover:border-cyan-500/30'}`}>
       <div className="relative">
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2">
-            <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold ${change >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
-              {stock.ticker.substring(0, 2)}
-            </div>
-            <div>
-              <h4 className="font-bold text-white text-sm">{stock.ticker}</h4>
-              <p className="text-[10px] text-slate-400 truncate max-w-[100px]">{stock.name}</p>
-            </div>
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold ${change >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>{stock.ticker.substring(0, 2)}</div>
+            <div><h4 className="font-bold text-white text-sm">{stock.ticker}</h4><p className="text-[10px] text-slate-400 truncate max-w-[100px]">{stock.name}</p></div>
           </div>
-          <button onClick={handleWatchlistToggle} disabled={isAdding}
-            className={`p-1.5 rounded-lg transition-all ${isInWatchlist ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700/50 text-slate-400 hover:text-amber-400'}`}>
+          <button onClick={handleWatchlistToggle} disabled={isAdding} className={`p-1.5 rounded-lg transition-all ${isInWatchlist ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700/50 text-slate-400 hover:text-amber-400'}`}>
             {isAdding ? <RefreshCw size={14} className="animate-spin" /> : <Star size={14} className={isInWatchlist ? 'fill-amber-400' : ''} />}
           </button>
         </div>
-        
         <div className="flex items-end justify-between mb-3">
           <div>
-            {isLoading ? (
-              <div className="animate-pulse"><div className="h-6 w-20 bg-slate-700 rounded mb-1"></div><div className="h-4 w-14 bg-slate-700 rounded"></div></div>
-            ) : (
-              <>
-                <p className="text-xl font-bold font-mono text-white">${price.toFixed(2)}</p>
-                <div className={`flex items-center gap-1 ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {change >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                  <span className="text-xs font-mono">{change >= 0 ? '+' : ''}{change.toFixed(2)}%</span>
-                </div>
-              </>
+            {isLoading ? (<div className="animate-pulse"><div className="h-6 w-20 bg-slate-700 rounded mb-1"></div><div className="h-4 w-14 bg-slate-700 rounded"></div></div>) : (
+              <><p className="text-xl font-bold font-mono text-white">${price.toFixed(2)}</p>
+              <div className={`flex items-center gap-1 ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {change >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                <span className="text-xs font-mono">{change >= 0 ? '+' : ''}{change.toFixed(2)}%</span>
+              </div></>
             )}
           </div>
           <SentimentMeter score={stock.sentiment || 50} size="sm" />
         </div>
-        
         <div className="flex items-center gap-2">
-          <button onClick={(e) => handleVote('up', e)} disabled={isVoting}
-            className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
-              userVote === 'bullish' ? 'bg-emerald-500 text-white' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}>
-            <ThumbsUp size={12} className={userVote === 'bullish' ? 'fill-white' : ''} />
-            <span className="text-xs font-bold">{localVotes.up.toLocaleString()}</span>
+          <button onClick={(e) => handleVote('up', e)} disabled={isVoting} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${userVote === 'bullish' ? 'bg-emerald-500 text-white' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}>
+            <ThumbsUp size={12} className={userVote === 'bullish' ? 'fill-white' : ''} /><span className="text-xs font-bold">{localVotes.up.toLocaleString()}</span>
           </button>
-          <button onClick={(e) => handleVote('down', e)} disabled={isVoting}
-            className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
-              userVote === 'bearish' ? 'bg-rose-500 text-white' : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'}`}>
-            <ThumbsDown size={12} className={userVote === 'bearish' ? 'fill-white' : ''} />
-            <span className="text-xs font-bold">{localVotes.down.toLocaleString()}</span>
+          <button onClick={(e) => handleVote('down', e)} disabled={isVoting} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${userVote === 'bearish' ? 'bg-rose-500 text-white' : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'}`}>
+            <ThumbsDown size={12} className={userVote === 'bearish' ? 'fill-white' : ''} /><span className="text-xs font-bold">{localVotes.down.toLocaleString()}</span>
           </button>
         </div>
-        
-        <div className="mt-2 h-1 bg-slate-700/50 rounded-full overflow-hidden">
-          <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all" style={{ width: `${bullishPercent}%` }} />
-        </div>
+        <div className="mt-2 h-1 bg-slate-700/50 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all" style={{ width: `${bullishPercent}%` }} /></div>
         <p className="text-[10px] text-slate-500 mt-1 text-center">{bullishPercent}% Bullish</p>
-        
-        {userVote && (
-          <div className={`absolute top-2 right-12 px-1.5 py-0.5 rounded text-[9px] font-bold ${
-            userVote === 'bullish' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
-            You: {userVote === 'bullish' ? '👍' : '👎'}
-          </div>
-        )}
+        {userVote && <div className={`absolute top-2 right-12 px-1.5 py-0.5 rounded text-[9px] font-bold ${userVote === 'bullish' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>You: {userVote === 'bullish' ? '👍' : '👎'}</div>}
       </div>
     </div>
   );
 };
 
-// Crypto card component
+// Crypto card
 const CryptoCard = ({ crypto, onSelect, isSelected, isInWatchlist, onToggleWatchlist, userVote, onVote, currentUser, isLoading }) => {
   const [localVotes, setLocalVotes] = useState({ up: crypto.thumbsUp || 100, down: crypto.thumbsDown || 50 });
   const [isVoting, setIsVoting] = useState(false);
@@ -340,84 +368,43 @@ const CryptoCard = ({ crypto, onSelect, isSelected, isInWatchlist, onToggleWatch
   const change = crypto.change || 0;
 
   return (
-    <div onClick={() => onSelect(crypto)}
-      className={`relative group p-4 rounded-xl border transition-all duration-300 cursor-pointer overflow-hidden ${
-        isSelected ? 'bg-orange-500/10 border-orange-500/50 shadow-lg shadow-orange-500/20' : 'bg-slate-800/30 border-slate-700/50 hover:border-orange-500/30'
-      }`}>
+    <div onClick={() => onSelect(crypto)} className={`relative group p-4 rounded-xl border transition-all duration-300 cursor-pointer overflow-hidden ${isSelected ? 'bg-orange-500/10 border-orange-500/50 shadow-lg shadow-orange-500/20' : 'bg-slate-800/30 border-slate-700/50 hover:border-orange-500/30'}`}>
       <div className="relative">
-        {/* Crypto badge */}
-        <div className="absolute top-0 right-0 px-1.5 py-0.5 bg-orange-500/20 rounded text-[9px] font-bold text-orange-400">
-          CRYPTO
-        </div>
-        
+        <div className="absolute top-0 right-0 px-1.5 py-0.5 bg-orange-500/20 rounded text-[9px] font-bold text-orange-400">CRYPTO</div>
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className={`w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden ${change >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>
-              {crypto.image ? (
-                <img src={crypto.image} alt={crypto.symbol} className="w-7 h-7 rounded-full" />
-              ) : (
-                <span className={`text-lg font-bold ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {CRYPTO_ICONS[crypto.symbol] || crypto.symbol.substring(0, 2)}
-                </span>
-              )}
+              {crypto.image ? <img src={crypto.image} alt={crypto.symbol} className="w-7 h-7 rounded-full" /> : <span className={`text-lg font-bold ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{CRYPTO_ICONS[crypto.symbol] || crypto.symbol.substring(0, 2)}</span>}
             </div>
-            <div>
-              <h4 className="font-bold text-white text-sm">{crypto.symbol}</h4>
-              <p className="text-[10px] text-slate-400 truncate max-w-[100px]">{crypto.name}</p>
-            </div>
+            <div><h4 className="font-bold text-white text-sm">{crypto.symbol}</h4><p className="text-[10px] text-slate-400 truncate max-w-[100px]">{crypto.name}</p></div>
           </div>
-          <button onClick={handleWatchlistToggle} disabled={isAdding}
-            className={`p-1.5 rounded-lg transition-all mt-4 ${isInWatchlist ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700/50 text-slate-400 hover:text-amber-400'}`}>
+          <button onClick={handleWatchlistToggle} disabled={isAdding} className={`p-1.5 rounded-lg transition-all mt-4 ${isInWatchlist ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700/50 text-slate-400 hover:text-amber-400'}`}>
             {isAdding ? <RefreshCw size={14} className="animate-spin" /> : <Star size={14} className={isInWatchlist ? 'fill-amber-400' : ''} />}
           </button>
         </div>
-        
         <div className="flex items-end justify-between mb-3">
           <div>
-            {isLoading ? (
-              <div className="animate-pulse"><div className="h-6 w-20 bg-slate-700 rounded mb-1"></div><div className="h-4 w-14 bg-slate-700 rounded"></div></div>
-            ) : (
-              <>
-                <p className="text-xl font-bold font-mono text-white">{formatCryptoPrice(crypto.price)}</p>
-                <div className={`flex items-center gap-1 ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {change >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                  <span className="text-xs font-mono">{change >= 0 ? '+' : ''}{change.toFixed(2)}%</span>
-                </div>
-              </>
+            {isLoading ? (<div className="animate-pulse"><div className="h-6 w-20 bg-slate-700 rounded mb-1"></div><div className="h-4 w-14 bg-slate-700 rounded"></div></div>) : (
+              <><p className="text-xl font-bold font-mono text-white">{formatCryptoPrice(crypto.price)}</p>
+              <div className={`flex items-center gap-1 ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {change >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                <span className="text-xs font-mono">{change >= 0 ? '+' : ''}{change.toFixed(2)}%</span>
+              </div></>
             )}
           </div>
-          <div className="text-right">
-            <p className="text-[10px] text-slate-500">MCap</p>
-            <p className="text-xs font-mono text-slate-400">{formatMarketCap(crypto.marketCap)}</p>
-          </div>
+          <div className="text-right"><p className="text-[10px] text-slate-500">MCap</p><p className="text-xs font-mono text-slate-400">{formatMarketCap(crypto.marketCap)}</p></div>
         </div>
-        
         <div className="flex items-center gap-2">
-          <button onClick={(e) => handleVote('up', e)} disabled={isVoting}
-            className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
-              userVote === 'bullish' ? 'bg-emerald-500 text-white' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}>
-            <ThumbsUp size={12} className={userVote === 'bullish' ? 'fill-white' : ''} />
-            <span className="text-xs font-bold">{localVotes.up.toLocaleString()}</span>
+          <button onClick={(e) => handleVote('up', e)} disabled={isVoting} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${userVote === 'bullish' ? 'bg-emerald-500 text-white' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}>
+            <ThumbsUp size={12} className={userVote === 'bullish' ? 'fill-white' : ''} /><span className="text-xs font-bold">{localVotes.up.toLocaleString()}</span>
           </button>
-          <button onClick={(e) => handleVote('down', e)} disabled={isVoting}
-            className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
-              userVote === 'bearish' ? 'bg-rose-500 text-white' : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'}`}>
-            <ThumbsDown size={12} className={userVote === 'bearish' ? 'fill-white' : ''} />
-            <span className="text-xs font-bold">{localVotes.down.toLocaleString()}</span>
+          <button onClick={(e) => handleVote('down', e)} disabled={isVoting} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${userVote === 'bearish' ? 'bg-rose-500 text-white' : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'}`}>
+            <ThumbsDown size={12} className={userVote === 'bearish' ? 'fill-white' : ''} /><span className="text-xs font-bold">{localVotes.down.toLocaleString()}</span>
           </button>
         </div>
-        
-        <div className="mt-2 h-1 bg-slate-700/50 rounded-full overflow-hidden">
-          <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all" style={{ width: `${bullishPercent}%` }} />
-        </div>
+        <div className="mt-2 h-1 bg-slate-700/50 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all" style={{ width: `${bullishPercent}%` }} /></div>
         <p className="text-[10px] text-slate-500 mt-1 text-center">{bullishPercent}% Bullish</p>
-        
-        {userVote && (
-          <div className={`absolute top-6 right-12 px-1.5 py-0.5 rounded text-[9px] font-bold ${
-            userVote === 'bullish' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
-            You: {userVote === 'bullish' ? '👍' : '👎'}
-          </div>
-        )}
+        {userVote && <div className={`absolute top-6 right-12 px-1.5 py-0.5 rounded text-[9px] font-bold ${userVote === 'bullish' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>You: {userVote === 'bullish' ? '👍' : '👎'}</div>}
       </div>
     </div>
   );
@@ -427,56 +414,33 @@ const CryptoCard = ({ crypto, onSelect, isSelected, isInWatchlist, onToggleWatch
 const CommentItem = ({ comment, currentUser }) => {
   const [liked, setLiked] = useState(comment.likes?.includes(currentUser?.uid));
   const [likesCount, setLikesCount] = useState(comment.likeCount || 0);
-
   const handleLike = async () => {
     if (!currentUser) { alert('Please sign in to like!'); return; }
-    if (liked) {
-      setLiked(false);
-      setLikesCount(prev => prev - 1);
-      await unlikeComment(currentUser.uid, comment.id, comment.uid);
-    } else {
-      setLiked(true);
-      setLikesCount(prev => prev + 1);
-      await likeComment(currentUser.uid, comment.id, comment.uid);
-    }
+    if (liked) { setLiked(false); setLikesCount(prev => prev - 1); await unlikeComment(currentUser.uid, comment.id, comment.uid); }
+    else { setLiked(true); setLikesCount(prev => prev + 1); await likeComment(currentUser.uid, comment.id, comment.uid); }
   };
-
-  const timeAgo = (date) => {
-    const seconds = Math.floor((new Date() - date) / 1000);
-    if (seconds < 60) return 'just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
-    return `${Math.floor(seconds / 86400)}d`;
-  };
-
+  const timeAgo = (date) => { const s = Math.floor((new Date() - date) / 1000); if (s < 60) return 'just now'; if (s < 3600) return `${Math.floor(s / 60)}m`; if (s < 86400) return `${Math.floor(s / 3600)}h`; return `${Math.floor(s / 86400)}d`; };
   return (
     <div className="p-3 bg-slate-800/30 rounded-lg border border-slate-700/50">
       <div className="flex items-start gap-2">
         <span className="text-xl">{getAvatar(comment.uid)}</span>
         <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-sm font-bold text-white">{comment.displayName}</span>
-            <span className="text-[10px] text-slate-500">{timeAgo(comment.createdAt)}</span>
-          </div>
+          <div className="flex items-center gap-2 mb-1"><span className="text-sm font-bold text-white">{comment.displayName}</span><span className="text-[10px] text-slate-500">{timeAgo(comment.createdAt)}</span></div>
           <p className="text-xs text-slate-300 leading-relaxed">{comment.content}</p>
-          <button onClick={handleLike} className={`mt-2 text-[10px] flex items-center gap-1 transition-colors ${liked ? 'text-rose-400' : 'text-slate-500 hover:text-rose-400'}`}>
-            <Heart size={10} className={liked ? 'fill-rose-400' : ''} />{likesCount}
-          </button>
+          <button onClick={handleLike} className={`mt-2 text-[10px] flex items-center gap-1 transition-colors ${liked ? 'text-rose-400' : 'text-slate-500 hover:text-rose-400'}`}><Heart size={10} className={liked ? 'fill-rose-400' : ''} />{likesCount}</button>
         </div>
       </div>
     </div>
   );
 };
 
-// Detail panel (works for both stocks and crypto)
-const DetailPanel = ({ item, onClose, userVote, isLoading, currentUser, comments, onAddComment, onRefreshComments, isCrypto }) => {
+// Detail panel with news
+const DetailPanel = ({ item, onClose, userVote, isLoading, currentUser, comments, onAddComment, onRefreshComments, isCrypto, news, isLoadingNews }) => {
   const [newComment, setNewComment] = useState('');
   const [isPosting, setIsPosting] = useState(false);
-
+  const [activeDetailTab, setActiveDetailTab] = useState('comments');
   if (!item) return null;
-
   const symbol = isCrypto ? item.symbol : item.ticker;
-
   const handlePostComment = async () => {
     if (!currentUser) { alert('Please sign in to comment!'); return; }
     if (!newComment.trim()) return;
@@ -486,28 +450,18 @@ const DetailPanel = ({ item, onClose, userVote, isLoading, currentUser, comments
     setIsPosting(false);
     onRefreshComments(symbol);
   };
-
   const price = item.price || 0;
   const change = item.change || 0;
 
   return (
-    <div className={`bg-slate-800/50 rounded-2xl border ${isCrypto ? 'border-orange-500/30' : 'border-slate-700/50'} p-5 animate-slideIn max-h-[80vh] overflow-y-auto`}>
+    <div className={`bg-slate-800/50 rounded-2xl border ${isCrypto ? 'border-orange-500/30' : 'border-slate-700/50'} p-5 animate-slideIn max-h-[85vh] overflow-y-auto`}>
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-2xl font-bold overflow-hidden ${change >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
-            {isCrypto && item.image ? (
-              <img src={item.image} alt={symbol} className="w-10 h-10 rounded-full" />
-            ) : isCrypto ? (
-              <span>{CRYPTO_ICONS[symbol] || symbol.substring(0, 2)}</span>
-            ) : (
-              symbol.substring(0, 2)
-            )}
+            {isCrypto && item.image ? <img src={item.image} alt={symbol} className="w-10 h-10 rounded-full" /> : isCrypto ? <span>{CRYPTO_ICONS[symbol] || symbol.substring(0, 2)}</span> : symbol.substring(0, 2)}
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-xl font-bold text-white">{symbol}</h3>
-              {isCrypto && <span className="px-1.5 py-0.5 bg-orange-500/20 rounded text-[10px] font-bold text-orange-400">CRYPTO</span>}
-            </div>
+            <div className="flex items-center gap-2"><h3 className="text-xl font-bold text-white">{symbol}</h3>{isCrypto && <span className="px-1.5 py-0.5 bg-orange-500/20 rounded text-[10px] font-bold text-orange-400">CRYPTO</span>}</div>
             <p className="text-sm text-slate-400">{item.name}</p>
           </div>
         </div>
@@ -515,155 +469,88 @@ const DetailPanel = ({ item, onClose, userVote, isLoading, currentUser, comments
       </div>
       
       <div className="grid grid-cols-3 gap-4 mb-4 p-3 bg-slate-900/50 rounded-xl">
-        {isLoading ? (
-          <div className="col-span-3 text-center py-2"><RefreshCw size={20} className="animate-spin mx-auto text-cyan-400" /></div>
-        ) : (
-          <>
-            <div><p className="text-[10px] text-slate-500 mb-1">Price</p><p className="text-lg font-bold font-mono text-white">{isCrypto ? formatCryptoPrice(price) : `$${price.toFixed(2)}`}</p></div>
-            <div><p className="text-[10px] text-slate-500 mb-1">24h Change</p><p className={`text-lg font-bold font-mono ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{change >= 0 ? '+' : ''}{change.toFixed(2)}%</p></div>
-            <div><p className="text-[10px] text-slate-500 mb-1">{isCrypto ? 'Market Cap' : 'Open'}</p><p className="text-lg font-bold font-mono text-white">{isCrypto ? formatMarketCap(item.marketCap) : `$${(item.open || 0).toFixed(2)}`}</p></div>
-          </>
+        {isLoading ? (<div className="col-span-3 text-center py-2"><RefreshCw size={20} className="animate-spin mx-auto text-cyan-400" /></div>) : (
+          <><div><p className="text-[10px] text-slate-500 mb-1">Price</p><p className="text-lg font-bold font-mono text-white">{isCrypto ? formatCryptoPrice(price) : `$${price.toFixed(2)}`}</p></div>
+          <div><p className="text-[10px] text-slate-500 mb-1">24h Change</p><p className={`text-lg font-bold font-mono ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{change >= 0 ? '+' : ''}{change.toFixed(2)}%</p></div>
+          <div><p className="text-[10px] text-slate-500 mb-1">{isCrypto ? 'Market Cap' : 'Open'}</p><p className="text-lg font-bold font-mono text-white">{isCrypto ? formatMarketCap(item.marketCap) : `$${(item.open || 0).toFixed(2)}`}</p></div></>
         )}
       </div>
 
-      {/* High/Low for crypto */}
-      {isCrypto && !isLoading && (
-        <div className="grid grid-cols-2 gap-4 mb-4 p-3 bg-slate-900/50 rounded-xl">
-          <div><p className="text-[10px] text-slate-500 mb-1">24h High</p><p className="text-sm font-bold font-mono text-emerald-400">{formatCryptoPrice(item.high24h)}</p></div>
-          <div><p className="text-[10px] text-slate-500 mb-1">24h Low</p><p className="text-sm font-bold font-mono text-rose-400">{formatCryptoPrice(item.low24h)}</p></div>
-        </div>
-      )}
+      {/* Tabs for Comments/News */}
+      <div className="flex gap-2 mb-4">
+        <button onClick={() => setActiveDetailTab('comments')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeDetailTab === 'comments' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-slate-800/50 text-slate-400 border border-slate-700/50'}`}>
+          <MessageSquare size={14} />Comments ({comments.length})
+        </button>
+        <button onClick={() => setActiveDetailTab('news')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeDetailTab === 'news' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'bg-slate-800/50 text-slate-400 border border-slate-700/50'}`}>
+          <Newspaper size={14} />News ({news.length})
+        </button>
+      </div>
 
-      {/* Rank for crypto */}
-      {isCrypto && item.rank && (
-        <div className="mb-4 p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-orange-400">Market Cap Rank</span>
-            <span className="text-xl font-bold text-white">#{item.rank}</span>
+      {activeDetailTab === 'comments' && (
+        <div>
+          {currentUser && (
+            <div className="flex gap-2 mb-3">
+              <input type="text" value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder="Share your thoughts..."
+                className="flex-1 px-3 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
+                onKeyDown={(e) => e.key === 'Enter' && handlePostComment()} />
+              <button onClick={handlePostComment} disabled={isPosting || !newComment.trim()} className="px-3 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 rounded-lg transition-colors">
+                {isPosting ? <Loader size={16} className="animate-spin" /> : <Send size={16} />}
+              </button>
+            </div>
+          )}
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {comments.length > 0 ? comments.map(comment => <CommentItem key={comment.id} comment={comment} currentUser={currentUser} />) : <p className="text-center text-slate-500 text-sm py-4">No comments yet. Be the first!</p>}
           </div>
         </div>
       )}
 
-      <div className="border-t border-slate-700/50 pt-4">
-        <h4 className="text-sm font-bold text-slate-300 flex items-center gap-2 mb-3">
-          <MessageSquare size={14} className="text-purple-400" />
-          Comments ({comments.length})
-        </h4>
-        
-        {currentUser && (
-          <div className="flex gap-2 mb-3">
-            <input type="text" value={newComment} onChange={(e) => setNewComment(e.target.value)}
-              placeholder="Share your thoughts..."
-              className="flex-1 px-3 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
-              onKeyDown={(e) => e.key === 'Enter' && handlePostComment()} />
-            <button onClick={handlePostComment} disabled={isPosting || !newComment.trim()}
-              className="px-3 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 rounded-lg transition-colors">
-              {isPosting ? <Loader size={16} className="animate-spin" /> : <Send size={16} />}
-            </button>
-          </div>
-        )}
-        
-        <div className="space-y-2 max-h-60 overflow-y-auto">
-          {comments.length > 0 ? (
-            comments.map(comment => <CommentItem key={comment.id} comment={comment} currentUser={currentUser} />)
+      {activeDetailTab === 'news' && (
+        <div className="space-y-2 max-h-80 overflow-y-auto">
+          {isLoadingNews ? (
+            <div className="text-center py-4"><Loader size={20} className="animate-spin mx-auto text-cyan-400" /></div>
+          ) : news.length > 0 ? (
+            news.map((article, i) => <NewsItem key={article.id || i} article={article} compact={true} />)
           ) : (
-            <p className="text-center text-slate-500 text-sm py-4">No comments yet. Be the first!</p>
+            <p className="text-center text-slate-500 text-sm py-4">No news available for {symbol}</p>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 };
 
-// Enhanced Leaderboard
+// Leaderboard
 const Leaderboard = ({ leaders, currentUser, onFollow, followingList }) => {
-  const getRankBadge = (rank) => {
-    if (rank === 1) return { bg: 'bg-amber-500', icon: '🥇' };
-    if (rank === 2) return { bg: 'bg-slate-400', icon: '🥈' };
-    if (rank === 3) return { bg: 'bg-amber-700', icon: '🥉' };
-    return { bg: 'bg-slate-700', icon: rank };
-  };
-
-  const getAccuracyColor = (accuracy) => {
-    if (accuracy >= 70) return 'text-emerald-400';
-    if (accuracy >= 50) return 'text-amber-400';
-    return 'text-rose-400';
-  };
-
+  const getRankBadge = (rank) => { if (rank === 1) return { bg: 'bg-amber-500', icon: '🥇' }; if (rank === 2) return { bg: 'bg-slate-400', icon: '🥈' }; if (rank === 3) return { bg: 'bg-amber-700', icon: '🥉' }; return { bg: 'bg-slate-700', icon: rank }; };
+  const getAccuracyColor = (accuracy) => { if (accuracy >= 70) return 'text-emerald-400'; if (accuracy >= 50) return 'text-amber-400'; return 'text-rose-400'; };
   return (
     <div className="bg-slate-800/30 rounded-xl border border-slate-700/50 p-4">
-      <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2 mb-1">
-        <Trophy size={14} className="text-amber-400" />
-        Top Traders
-      </h3>
-      <p className="text-[10px] text-slate-500 mb-3">Ranked by accuracy, followers & engagement</p>
-      
+      <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2 mb-1"><Trophy size={14} className="text-amber-400" />Top Traders</h3>
+      <p className="text-[10px] text-slate-500 mb-3">Ranked by accuracy & engagement</p>
       <div className="space-y-2">
         {leaders.map((leader, i) => {
-          const rank = getRankBadge(i + 1);
-          const isFollowing = followingList?.includes(leader.uid);
-          
+          const rank = getRankBadge(i + 1); const isFollowing = followingList?.includes(leader.uid);
           return (
             <div key={leader.uid} className="p-2 rounded-lg bg-slate-900/30 hover:bg-slate-700/30 transition-colors">
               <div className="flex items-center gap-2">
-                <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${rank.bg} text-white`}>
-                  {typeof rank.icon === 'string' ? rank.icon : i + 1}
-                </span>
+                <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${rank.bg} text-white`}>{typeof rank.icon === 'string' ? rank.icon : i + 1}</span>
                 <span className="text-lg">{getAvatar(leader.uid)}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-white truncate">{leader.displayName}</p>
                   <div className="flex items-center gap-2 text-[10px]">
-                    <span className={`flex items-center gap-0.5 ${getAccuracyColor(leader.accuracy)}`}>
-                      <Target size={10} />
-                      {leader.accuracy}%
-                    </span>
-                    {leader.streak > 0 && (
-                      <span className="flex items-center gap-0.5 text-orange-400">
-                        <Flame size={10} />
-                        {leader.streak}
-                      </span>
-                    )}
-                    <span className="text-slate-500">{leader.followerCount} followers</span>
+                    <span className={`flex items-center gap-0.5 ${getAccuracyColor(leader.accuracy)}`}><Target size={10} />{leader.accuracy}%</span>
+                    {leader.streak > 0 && <span className="flex items-center gap-0.5 text-orange-400"><Flame size={10} />{leader.streak}</span>}
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-cyan-400">{leader.reputationScore}</p>
-                  <p className="text-[9px] text-slate-500">REP</p>
-                </div>
+                <div className="text-right"><p className="text-sm font-bold text-cyan-400">{leader.reputationScore}</p><p className="text-[9px] text-slate-500">REP</p></div>
                 {currentUser && currentUser.uid !== leader.uid && (
-                  <button onClick={() => onFollow(leader.uid)}
-                    className={`p-1.5 rounded transition-colors ${isFollowing ? 'bg-slate-600 text-slate-400' : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400'}`}>
-                    {isFollowing ? <Check size={12} /> : <UserPlus size={12} />}
-                  </button>
+                  <button onClick={() => onFollow(leader.uid)} className={`p-1.5 rounded transition-colors ${isFollowing ? 'bg-slate-600 text-slate-400' : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400'}`}>{isFollowing ? <Check size={12} /> : <UserPlus size={12} />}</button>
                 )}
-              </div>
-              <div className="mt-2 flex items-center gap-1">
-                <div className="flex-1 h-1 bg-slate-700/50 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-cyan-500 to-purple-500 transition-all" style={{ width: `${Math.min(leader.reputationScore, 100)}%` }} />
-                </div>
-                <span className="text-[9px] text-slate-500">{leader.totalVotes} votes</span>
               </div>
             </div>
           );
         })}
-        
-        {leaders.length === 0 && (
-          <div className="text-center py-4">
-            <Award size={24} className="mx-auto text-slate-600 mb-2" />
-            <p className="text-slate-500 text-sm">No traders yet</p>
-            <p className="text-slate-600 text-xs">Vote on stocks to join!</p>
-          </div>
-        )}
-      </div>
-      
-      <div className="mt-3 p-2 bg-slate-900/50 rounded-lg">
-        <p className="text-[10px] text-slate-500 font-bold mb-1">How scores work:</p>
-        <div className="grid grid-cols-2 gap-1 text-[9px] text-slate-600">
-          <span>🎯 Accuracy: 50%</span>
-          <span>👥 Followers: 30%</span>
-          <span>❤️ Engagement: 20%</span>
-          <span>🔥 Streak bonus</span>
-        </div>
+        {leaders.length === 0 && <div className="text-center py-4"><Award size={24} className="mx-auto text-slate-600 mb-2" /><p className="text-slate-500 text-sm">No traders yet</p></div>}
       </div>
     </div>
   );
@@ -682,18 +569,13 @@ export default function Finnysights() {
   const [userProfile, setUserProfile] = useState(null);
   const [isLoadingWatchlist, setIsLoadingWatchlist] = useState(false);
   
-  // Stocks state
   const [stocks, setStocks] = useState(DEFAULT_STOCKS.map(s => ({ ...s, price: 0, change: 0, high: 0, low: 0, open: 0 })));
   const [isLoadingStocks, setIsLoadingStocks] = useState(true);
-  
-  // Crypto state
   const [cryptos, setCryptos] = useState([]);
   const [isLoadingCrypto, setIsLoadingCrypto] = useState(true);
-  
   const [lastUpdated, setLastUpdated] = useState(null);
   const [isOnline, setIsOnline] = useState(true);
   
-  // Search state
   const [stockSearchResults, setStockSearchResults] = useState([]);
   const [cryptoSearchResults, setCryptoSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -703,206 +585,126 @@ export default function Finnysights() {
 
   const [comments, setComments] = useState([]);
   const [leaders, setLeaders] = useState([]);
+  
+  // News state
+  const [news, setNews] = useState([]);
+  const [isLoadingNews, setIsLoadingNews] = useState(false);
+  const [itemNews, setItemNews] = useState([]);
+  const [isLoadingItemNews, setIsLoadingItemNews] = useState(false);
 
-  // Fetch crypto data
+  // Fetch news
+  const fetchNews = useCallback(async () => {
+    setIsLoadingNews(true);
+    const newsData = await getCombinedNews();
+    setNews(newsData);
+    setIsLoadingNews(false);
+  }, []);
+
+  // Fetch news for selected item
+  const fetchItemNews = useCallback(async (symbol, isCrypto) => {
+    setIsLoadingItemNews(true);
+    let newsData;
+    if (isCrypto) {
+      newsData = await getCryptoNewsBySymbol(symbol);
+    } else {
+      newsData = await getStockNews(symbol);
+    }
+    setItemNews(newsData || []);
+    setIsLoadingItemNews(false);
+  }, []);
+
   const fetchCryptoData = useCallback(async () => {
     setIsLoadingCrypto(true);
     try {
       const cryptoData = await getCryptoMarketData(10);
-      setCryptos(cryptoData.map(c => ({
-        ...c,
-        ticker: c.symbol,
-        thumbsUp: Math.floor(Math.random() * 5000) + 1000,
-        thumbsDown: Math.floor(Math.random() * 2000) + 500,
-        sentiment: Math.floor(Math.random() * 40) + 50,
-      })));
+      setCryptos(cryptoData.map(c => ({ ...c, ticker: c.symbol, thumbsUp: Math.floor(Math.random() * 5000) + 1000, thumbsDown: Math.floor(Math.random() * 2000) + 500, sentiment: Math.floor(Math.random() * 40) + 50 })));
       setIsOnline(true);
-    } catch (error) {
-      console.error('Error fetching crypto:', error);
-    }
+    } catch (error) { console.error('Error fetching crypto:', error); }
     setIsLoadingCrypto(false);
   }, []);
 
-  // Fetch stock prices
   const fetchStockPrices = useCallback(async () => {
     setIsLoadingStocks(true);
     try {
       const symbols = stocks.map(s => s.ticker);
       const quotes = await getMultipleQuotes(symbols);
-      setStocks(prev => prev.map(stock => {
-        const quote = quotes[stock.ticker];
-        if (quote) return { ...stock, price: quote.currentPrice, change: quote.changePercent, high: quote.high, low: quote.low, open: quote.open };
-        return stock;
-      }));
+      setStocks(prev => prev.map(stock => { const quote = quotes[stock.ticker]; if (quote) return { ...stock, price: quote.currentPrice, change: quote.changePercent, high: quote.high, low: quote.low, open: quote.open }; return stock; }));
       setLastUpdated(new Date());
       setIsOnline(true);
-    } catch (error) {
-      console.error('Error fetching stocks:', error);
-      setIsOnline(false);
-    }
+    } catch (error) { console.error('Error fetching stocks:', error); setIsOnline(false); }
     setIsLoadingStocks(false);
   }, [stocks]);
 
-  // Fetch all prices
-  const fetchAllPrices = useCallback(async () => {
-    await Promise.all([fetchStockPrices(), fetchCryptoData()]);
-    setLastUpdated(new Date());
-  }, [fetchStockPrices, fetchCryptoData]);
-
-  // Fetch comments
-  const fetchComments = useCallback(async (symbol) => {
-    if (!symbol) return;
-    const stockComments = await getStockComments(symbol, 20);
-    setComments(stockComments);
-  }, []);
-
-  // Fetch leaderboard
-  const fetchLeaderboard = useCallback(async () => {
-    const topLeaders = await getTopTraders(5);
-    setLeaders(topLeaders);
-  }, []);
-
-  // Handle comment creation
-  const handleAddComment = async (symbol, content) => {
-    if (!currentUser) return;
-    await addComment(currentUser.uid, symbol, content);
-  };
-
-  // Handle follow/unfollow
+  const fetchAllPrices = useCallback(async () => { await Promise.all([fetchStockPrices(), fetchCryptoData()]); setLastUpdated(new Date()); }, [fetchStockPrices, fetchCryptoData]);
+  const fetchComments = useCallback(async (symbol) => { if (!symbol) return; const stockComments = await getStockComments(symbol, 20); setComments(stockComments); }, []);
+  const fetchLeaderboard = useCallback(async () => { const topLeaders = await getTopTraders(5); setLeaders(topLeaders); }, []);
+  const handleAddComment = async (symbol, content) => { if (!currentUser) return; await addComment(currentUser.uid, symbol, content); };
+  
   const handleFollow = async (targetUid) => {
     if (!currentUser) return;
     const isCurrentlyFollowing = userProfile?.following?.includes(targetUid);
-    
-    if (isCurrentlyFollowing) {
-      await unfollowUser(currentUser.uid, targetUid);
-    } else {
-      await followUser(currentUser.uid, targetUid);
-    }
-    
+    if (isCurrentlyFollowing) await unfollowUser(currentUser.uid, targetUid);
+    else await followUser(currentUser.uid, targetUid);
     const updatedProfile = await getUserProfile(currentUser.uid);
     setUserProfile(updatedProfile);
     fetchLeaderboard();
   };
 
-  // Search handler
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (searchRef.current && !searchRef.current.contains(e.target)) setShowSearchDropdown(false);
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  useEffect(() => { const handleClickOutside = (e) => { if (searchRef.current && !searchRef.current.contains(e.target)) setShowSearchDropdown(false); }; document.addEventListener('mousedown', handleClickOutside); return () => document.removeEventListener('mousedown', handleClickOutside); }, []);
 
   useEffect(() => {
-    if (searchQuery.length < 2) { 
-      setStockSearchResults([]); 
-      setCryptoSearchResults([]);
-      setShowSearchDropdown(false); 
-      return; 
-    }
-    
+    if (searchQuery.length < 2) { setStockSearchResults([]); setCryptoSearchResults([]); setShowSearchDropdown(false); return; }
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     searchTimeoutRef.current = setTimeout(async () => {
-      setIsSearching(true);
-      setShowSearchDropdown(true);
-      
-      // Search both stocks and crypto in parallel
-      const [stockResults, cryptoResults] = await Promise.all([
-        searchStocks(searchQuery),
-        searchCrypto(searchQuery)
-      ]);
-      
-      setStockSearchResults(stockResults);
-      setCryptoSearchResults(cryptoResults);
-      setIsSearching(false);
+      setIsSearching(true); setShowSearchDropdown(true);
+      const [stockResults, cryptoResults] = await Promise.all([searchStocks(searchQuery), searchCrypto(searchQuery)]);
+      setStockSearchResults(stockResults); setCryptoSearchResults(cryptoResults); setIsSearching(false);
     }, 300);
-    
     return () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); };
   }, [searchQuery]);
 
   const handleSearchSelectStock = async (result) => {
-    setShowSearchDropdown(false);
-    setSearchQuery('');
-    setActiveTab('stocks');
+    setShowSearchDropdown(false); setSearchQuery(''); setActiveTab('stocks');
     const existingStock = stocks.find(s => s.ticker === result.symbol);
-    if (existingStock) { 
-      setSelectedItem(existingStock); 
-      setSelectedIsCrypto(false);
-      return; 
-    }
+    if (existingStock) { setSelectedItem(existingStock); setSelectedIsCrypto(false); return; }
     const quote = await getQuote(result.symbol);
     const newStock = { ticker: result.symbol, name: result.name, sector: 'Stock', price: quote?.currentPrice || 0, change: quote?.changePercent || 0, high: quote?.high || 0, low: quote?.low || 0, open: quote?.open || 0, thumbsUp: 0, thumbsDown: 0, sentiment: 50, sentimentLabel: 'Neutral' };
-    setStocks(prev => [newStock, ...prev]);
-    setSelectedItem(newStock);
-    setSelectedIsCrypto(false);
+    setStocks(prev => [newStock, ...prev]); setSelectedItem(newStock); setSelectedIsCrypto(false);
   };
 
   const handleSearchSelectCrypto = async (result) => {
-    setShowSearchDropdown(false);
-    setSearchQuery('');
-    setActiveTab('crypto');
+    setShowSearchDropdown(false); setSearchQuery(''); setActiveTab('crypto');
     const existingCrypto = cryptos.find(c => c.symbol === result.symbol);
-    if (existingCrypto) { 
-      setSelectedItem(existingCrypto); 
-      setSelectedIsCrypto(true);
-      return; 
-    }
-    // For new cryptos, add to list
-    const newCrypto = { 
-      ...result, 
-      ticker: result.symbol,
-      price: 0, 
-      change: 0, 
-      thumbsUp: 100, 
-      thumbsDown: 50, 
-      sentiment: 50 
-    };
-    setCryptos(prev => [newCrypto, ...prev]);
-    setSelectedItem(newCrypto);
-    setSelectedIsCrypto(true);
+    if (existingCrypto) { setSelectedItem(existingCrypto); setSelectedIsCrypto(true); return; }
+    const newCrypto = { ...result, ticker: result.symbol, price: 0, change: 0, thumbsUp: 100, thumbsDown: 50, sentiment: 50 };
+    setCryptos(prev => [newCrypto, ...prev]); setSelectedItem(newCrypto); setSelectedIsCrypto(true);
   };
 
-  // Initial data fetch
-  useEffect(() => {
-    fetchStockPrices();
-    fetchCryptoData();
-    fetchLeaderboard();
-    const interval = setInterval(fetchAllPrices, 60000);
-    return () => clearInterval(interval);
-  }, []);
-
+  useEffect(() => { fetchStockPrices(); fetchCryptoData(); fetchLeaderboard(); fetchNews(); const interval = setInterval(fetchAllPrices, 60000); return () => clearInterval(interval); }, []);
+  
   useEffect(() => {
     if (selectedItem) {
       const symbol = selectedIsCrypto ? selectedItem.symbol : selectedItem.ticker;
       fetchComments(symbol);
+      fetchItemNews(symbol, selectedIsCrypto);
     }
-  }, [selectedItem, selectedIsCrypto, fetchComments]);
+  }, [selectedItem, selectedIsCrypto, fetchComments, fetchItemNews]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
         setIsLoadingWatchlist(true);
-        const profile = await getUserProfile(user.uid);
-        setUserProfile(profile);
-        const userWatchlist = await getWatchlist(user.uid);
-        setWatchlist(userWatchlist || []);
-        const votes = await getUserVotes(user.uid);
-        setUserVotes(votes || {});
+        const profile = await getUserProfile(user.uid); setUserProfile(profile);
+        const userWatchlist = await getWatchlist(user.uid); setWatchlist(userWatchlist || []);
+        const votes = await getUserVotes(user.uid); setUserVotes(votes || {});
         setIsLoadingWatchlist(false);
-      } else {
-        setUserProfile(null);
-        setWatchlist([]);
-        setUserVotes({});
-      }
+      } else { setUserProfile(null); setWatchlist([]); setUserVotes({}); }
     });
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+  useEffect(() => { const timer = setInterval(() => setTime(new Date()), 1000); return () => clearInterval(timer); }, []);
 
   const handleSignOut = async () => { try { await signOut(auth); } catch (error) { console.error('Sign out error:', error); } };
 
@@ -910,30 +712,19 @@ export default function Finnysights() {
     if (!currentUser) return;
     const symbol = item.ticker || item.symbol;
     const isInWatchlist = watchlist.some(s => s.symbol === symbol);
-    if (isInWatchlist) {
-      const success = await removeFromWatchlist(currentUser.uid, symbol);
-      if (success) setWatchlist(prev => prev.filter(s => s.symbol !== symbol));
-    } else {
-      const success = await addToWatchlist(currentUser.uid, { symbol, name: item.name });
-      if (success) setWatchlist(prev => [...prev, { symbol, name: item.name, addedAt: new Date().toISOString() }]);
-    }
+    if (isInWatchlist) { const success = await removeFromWatchlist(currentUser.uid, symbol); if (success) setWatchlist(prev => prev.filter(s => s.symbol !== symbol)); }
+    else { const success = await addToWatchlist(currentUser.uid, { symbol, name: item.name }); if (success) setWatchlist(prev => [...prev, { symbol, name: item.name, addedAt: new Date().toISOString() }]); }
   };
 
   const handleVote = async (symbol, vote, price) => {
     if (!currentUser) return;
-    if (vote === null) {
-      await removeVote(currentUser.uid, symbol);
-      setUserVotes(prev => { const updated = { ...prev }; delete updated[symbol]; return updated; });
-    } else {
-      await recordVote(currentUser.uid, symbol, vote, price);
-      setUserVotes(prev => ({ ...prev, [symbol]: { vote, votedAt: new Date().toISOString(), priceAtVote: price } }));
-    }
+    if (vote === null) { await removeVote(currentUser.uid, symbol); setUserVotes(prev => { const updated = { ...prev }; delete updated[symbol]; return updated; }); }
+    else { await recordVote(currentUser.uid, symbol, vote, price); setUserVotes(prev => ({ ...prev, [symbol]: { vote, votedAt: new Date().toISOString(), priceAtVote: price } })); }
     setTimeout(fetchLeaderboard, 1000);
   };
 
   const getUserVoteForSymbol = (symbol) => userVotes[symbol]?.vote || null;
   const isInWatchlist = (symbol) => watchlist.some(s => s.symbol === symbol);
-
   const isLoading = activeTab === 'crypto' ? isLoadingCrypto : isLoadingStocks;
 
   return (
@@ -946,23 +737,20 @@ export default function Finnysights() {
         @keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(1); } 50% { opacity: 1; transform: scale(1.5); } }
         @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         .animate-slideIn { animation: slideIn 0.5s ease-out forwards; }
+        .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
       `}</style>
       
-      {/* Header */}
       <header className="relative z-10 border-b border-slate-800/50 bg-slate-900/50 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <a href="/" className="flex items-center gap-2">
-                <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-xl flex items-center justify-center shadow-lg shadow-cyan-500/20">
-                  <ThumbsUpLogo size={22} className="text-white" />
-                </div>
+                <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-xl flex items-center justify-center shadow-lg shadow-cyan-500/20"><ThumbsUpLogo size={22} className="text-white" /></div>
                 <span className="text-xl font-black tracking-tight hidden sm:block">finnysights</span>
               </a>
               <div className="hidden md:flex items-center gap-2 ml-4 px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50">
                 <Clock size={14} className="text-cyan-400" />
                 <span className="font-mono text-sm text-slate-300">{time.toLocaleTimeString('en-US', { hour12: false })}</span>
-                <span className="text-[10px] text-slate-500">EST</span>
                 <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-rose-400'}`} />
               </div>
             </div>
@@ -975,22 +763,11 @@ export default function Finnysights() {
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50" />
                 {searchQuery && <button onClick={() => { setSearchQuery(''); setShowSearchDropdown(false); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"><X size={14} /></button>}
               </div>
-              {showSearchDropdown && (
-                <SearchDropdown 
-                  query={searchQuery} 
-                  stockResults={stockSearchResults} 
-                  cryptoResults={cryptoSearchResults}
-                  isLoading={isSearching} 
-                  onSelectStock={handleSearchSelectStock}
-                  onSelectCrypto={handleSearchSelectCrypto}
-                />
-              )}
+              {showSearchDropdown && <SearchDropdown query={searchQuery} stockResults={stockSearchResults} cryptoResults={cryptoSearchResults} isLoading={isSearching} onSelectStock={handleSearchSelectStock} onSelectCrypto={handleSearchSelectCrypto} />}
             </div>
             
             <div className="flex items-center gap-2">
-              <button onClick={fetchAllPrices} disabled={isLoading} className="p-2.5 bg-slate-800/50 hover:bg-slate-700/50 rounded-xl border border-slate-700/50">
-                <RefreshCw size={18} className={`text-slate-400 ${isLoading ? 'animate-spin' : ''}`} />
-              </button>
+              <button onClick={fetchAllPrices} disabled={isLoading} className="p-2.5 bg-slate-800/50 hover:bg-slate-700/50 rounded-xl border border-slate-700/50"><RefreshCw size={18} className={`text-slate-400 ${isLoading ? 'animate-spin' : ''}`} /></button>
               {currentUser ? (
                 <>
                   <a href="/dashboard" className="p-2.5 bg-slate-800/50 hover:bg-slate-700/50 rounded-xl border border-slate-700/50"><Settings size={18} className="text-slate-400" /></a>
@@ -1003,7 +780,6 @@ export default function Finnysights() {
             </div>
           </div>
         </div>
-        
         <div className="border-t border-slate-800/50 bg-slate-900/30">
           <div className="max-w-7xl mx-auto px-4 py-2">
             <div className="flex items-center gap-3 overflow-x-auto pb-1">
@@ -1026,131 +802,58 @@ export default function Finnysights() {
       <main className="relative z-10 max-w-7xl mx-auto px-4 py-6">
         <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
-            {/* Main tabs - Stocks vs Crypto */}
             <div className="flex items-center gap-2 mb-4">
-              <button onClick={() => setActiveTab('stocks')}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
-                  activeTab === 'stocks' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-                }`}>
-                <TrendingUp size={14} />Stocks
-              </button>
-              <button onClick={() => setActiveTab('crypto')}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
-                  activeTab === 'crypto' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-                }`}>
-                <Bitcoin size={14} />Crypto
-              </button>
-              <button onClick={() => setActiveTab('watchlist')}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
-                  activeTab === 'watchlist' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-                }`}>
-                <Star size={14} />Watchlist{watchlist.length > 0 ? ` (${watchlist.length})` : ''}
-              </button>
+              <button onClick={() => setActiveTab('stocks')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'stocks' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}><TrendingUp size={14} />Stocks</button>
+              <button onClick={() => setActiveTab('crypto')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'crypto' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}><Bitcoin size={14} />Crypto</button>
+              <button onClick={() => setActiveTab('news')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'news' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}><Newspaper size={14} />News</button>
+              <button onClick={() => setActiveTab('watchlist')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'watchlist' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}><Star size={14} />Watchlist{watchlist.length > 0 ? ` (${watchlist.length})` : ''}</button>
             </div>
             
-            {/* Watchlist prompts */}
+            {activeTab === 'news' && <NewsFeed news={news} isLoading={isLoadingNews} onRefresh={fetchNews} title="Latest Market News" />}
+            
             {activeTab === 'watchlist' && !currentUser && (
               <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
-                <Star size={32} className="mx-auto text-slate-600 mb-3" />
-                <h3 className="text-lg font-bold text-white mb-2">Sign in to use Watchlist</h3>
+                <Star size={32} className="mx-auto text-slate-600 mb-3" /><h3 className="text-lg font-bold text-white mb-2">Sign in to use Watchlist</h3>
                 <a href="/" className="inline-block px-6 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg font-bold text-sm">Sign In / Sign Up</a>
               </div>
             )}
             
             {activeTab === 'watchlist' && currentUser && watchlist.length === 0 && !isLoadingWatchlist && (
               <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
-                <Star size={32} className="mx-auto text-slate-600 mb-3" />
-                <h3 className="text-lg font-bold text-white mb-2">Your watchlist is empty</h3>
-                <p className="text-slate-400 text-sm mb-4">Add stocks or crypto to your watchlist</p>
+                <Star size={32} className="mx-auto text-slate-600 mb-3" /><h3 className="text-lg font-bold text-white mb-2">Your watchlist is empty</h3>
                 <button onClick={() => setActiveTab('stocks')} className="px-6 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold text-sm">Browse Markets</button>
               </div>
             )}
             
-            {/* Stocks grid */}
             {activeTab === 'stocks' && (
               <div className="grid sm:grid-cols-2 gap-4">
                 {stocks.map((stock, i) => (
                   <div key={stock.ticker} style={{ animationDelay: `${i * 50}ms` }}>
-                    <StockCard 
-                      stock={stock} 
-                      onSelect={(s) => { setSelectedItem(s); setSelectedIsCrypto(false); }} 
-                      isSelected={!selectedIsCrypto && selectedItem?.ticker === stock.ticker}
-                      isInWatchlist={isInWatchlist(stock.ticker)} 
-                      onToggleWatchlist={handleToggleWatchlist}
-                      userVote={getUserVoteForSymbol(stock.ticker)} 
-                      onVote={handleVote} 
-                      currentUser={currentUser} 
-                      isLoading={isLoadingStocks} 
-                    />
+                    <StockCard stock={stock} onSelect={(s) => { setSelectedItem(s); setSelectedIsCrypto(false); }} isSelected={!selectedIsCrypto && selectedItem?.ticker === stock.ticker}
+                      isInWatchlist={isInWatchlist(stock.ticker)} onToggleWatchlist={handleToggleWatchlist} userVote={getUserVoteForSymbol(stock.ticker)} onVote={handleVote} currentUser={currentUser} isLoading={isLoadingStocks} />
                   </div>
                 ))}
               </div>
             )}
             
-            {/* Crypto grid */}
             {activeTab === 'crypto' && (
               <div className="grid sm:grid-cols-2 gap-4">
                 {cryptos.map((crypto, i) => (
                   <div key={crypto.id || crypto.symbol} style={{ animationDelay: `${i * 50}ms` }}>
-                    <CryptoCard 
-                      crypto={crypto} 
-                      onSelect={(c) => { setSelectedItem(c); setSelectedIsCrypto(true); }} 
-                      isSelected={selectedIsCrypto && selectedItem?.symbol === crypto.symbol}
-                      isInWatchlist={isInWatchlist(crypto.symbol)} 
-                      onToggleWatchlist={handleToggleWatchlist}
-                      userVote={getUserVoteForSymbol(crypto.symbol)} 
-                      onVote={handleVote} 
-                      currentUser={currentUser} 
-                      isLoading={isLoadingCrypto} 
-                    />
+                    <CryptoCard crypto={crypto} onSelect={(c) => { setSelectedItem(c); setSelectedIsCrypto(true); }} isSelected={selectedIsCrypto && selectedItem?.symbol === crypto.symbol}
+                      isInWatchlist={isInWatchlist(crypto.symbol)} onToggleWatchlist={handleToggleWatchlist} userVote={getUserVoteForSymbol(crypto.symbol)} onVote={handleVote} currentUser={currentUser} isLoading={isLoadingCrypto} />
                   </div>
                 ))}
               </div>
             )}
             
-            {/* Watchlist grid (mixed stocks and crypto) */}
             {activeTab === 'watchlist' && currentUser && watchlist.length > 0 && (
               <div className="grid sm:grid-cols-2 gap-4">
                 {watchlist.map((item, i) => {
                   const stock = stocks.find(s => s.ticker === item.symbol);
                   const crypto = cryptos.find(c => c.symbol === item.symbol);
-                  
-                  if (stock) {
-                    return (
-                      <div key={item.symbol} style={{ animationDelay: `${i * 50}ms` }}>
-                        <StockCard 
-                          stock={stock} 
-                          onSelect={(s) => { setSelectedItem(s); setSelectedIsCrypto(false); }} 
-                          isSelected={!selectedIsCrypto && selectedItem?.ticker === stock.ticker}
-                          isInWatchlist={true} 
-                          onToggleWatchlist={handleToggleWatchlist}
-                          userVote={getUserVoteForSymbol(stock.ticker)} 
-                          onVote={handleVote} 
-                          currentUser={currentUser} 
-                          isLoading={isLoadingStocks} 
-                        />
-                      </div>
-                    );
-                  }
-                  
-                  if (crypto) {
-                    return (
-                      <div key={item.symbol} style={{ animationDelay: `${i * 50}ms` }}>
-                        <CryptoCard 
-                          crypto={crypto} 
-                          onSelect={(c) => { setSelectedItem(c); setSelectedIsCrypto(true); }} 
-                          isSelected={selectedIsCrypto && selectedItem?.symbol === crypto.symbol}
-                          isInWatchlist={true} 
-                          onToggleWatchlist={handleToggleWatchlist}
-                          userVote={getUserVoteForSymbol(crypto.symbol)} 
-                          onVote={handleVote} 
-                          currentUser={currentUser} 
-                          isLoading={isLoadingCrypto} 
-                        />
-                      </div>
-                    );
-                  }
-                  
+                  if (stock) return <div key={item.symbol} style={{ animationDelay: `${i * 50}ms` }}><StockCard stock={stock} onSelect={(s) => { setSelectedItem(s); setSelectedIsCrypto(false); }} isSelected={!selectedIsCrypto && selectedItem?.ticker === stock.ticker} isInWatchlist={true} onToggleWatchlist={handleToggleWatchlist} userVote={getUserVoteForSymbol(stock.ticker)} onVote={handleVote} currentUser={currentUser} isLoading={isLoadingStocks} /></div>;
+                  if (crypto) return <div key={item.symbol} style={{ animationDelay: `${i * 50}ms` }}><CryptoCard crypto={crypto} onSelect={(c) => { setSelectedItem(c); setSelectedIsCrypto(true); }} isSelected={selectedIsCrypto && selectedItem?.symbol === crypto.symbol} isInWatchlist={true} onToggleWatchlist={handleToggleWatchlist} userVote={getUserVoteForSymbol(crypto.symbol)} onVote={handleVote} currentUser={currentUser} isLoading={isLoadingCrypto} /></div>;
                   return null;
                 })}
               </div>
@@ -1159,30 +862,15 @@ export default function Finnysights() {
           
           <div className="space-y-4">
             {selectedItem ? (
-              <DetailPanel 
-                item={selectedItem} 
-                onClose={() => setSelectedItem(null)} 
-                userVote={getUserVoteForSymbol(selectedIsCrypto ? selectedItem.symbol : selectedItem.ticker)}
-                isLoading={isLoading} 
-                currentUser={currentUser} 
-                comments={comments} 
-                onAddComment={handleAddComment}
-                onRefreshComments={fetchComments}
-                isCrypto={selectedIsCrypto}
-              />
+              <DetailPanel item={selectedItem} onClose={() => setSelectedItem(null)} userVote={getUserVoteForSymbol(selectedIsCrypto ? selectedItem.symbol : selectedItem.ticker)}
+                isLoading={isLoading} currentUser={currentUser} comments={comments} onAddComment={handleAddComment} onRefreshComments={fetchComments} isCrypto={selectedIsCrypto}
+                news={itemNews} isLoadingNews={isLoadingItemNews} />
             ) : (
               <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
-                <BarChart3 size={32} className="mx-auto text-slate-600 mb-3" />
-                <p className="text-slate-400 text-sm">Select a stock or crypto to view details</p>
+                <BarChart3 size={32} className="mx-auto text-slate-600 mb-3" /><p className="text-slate-400 text-sm">Select a stock or crypto to view details</p>
               </div>
             )}
-            
-            <Leaderboard 
-              leaders={leaders} 
-              currentUser={currentUser} 
-              onFollow={handleFollow}
-              followingList={userProfile?.following || []}
-            />
+            <Leaderboard leaders={leaders} currentUser={currentUser} onFollow={handleFollow} followingList={userProfile?.following || []} />
           </div>
         </div>
       </main>

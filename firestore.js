@@ -70,12 +70,28 @@ export const createUserProfile = async (user) => {
     console.log('New user profile created');
     return userData;
   } else {
-    // Existing user - update last login
-    await updateDoc(userRef, {
+    // Existing user - update last login AND ensure new fields exist
+    const existingData = userSnap.data();
+    const updates = {
       lastLogin: serverTimestamp(),
-    });
-    console.log('User profile updated');
-    return userSnap.data();
+    };
+    
+    // Add missing fields for existing users (migration)
+    if (existingData.totalVotes === undefined) updates.totalVotes = 0;
+    if (existingData.correctPredictions === undefined) updates.correctPredictions = 0;
+    if (existingData.accuracy === undefined) updates.accuracy = 0;
+    if (existingData.streak === undefined) updates.streak = 0;
+    if (existingData.bestStreak === undefined) updates.bestStreak = 0;
+    if (existingData.totalLikesReceived === undefined) updates.totalLikesReceived = 0;
+    if (existingData.reputationScore === undefined) updates.reputationScore = 0;
+    if (existingData.followers === undefined) updates.followers = [];
+    if (existingData.following === undefined) updates.following = [];
+    if (existingData.followerCount === undefined) updates.followerCount = 0;
+    if (existingData.followingCount === undefined) updates.followingCount = 0;
+    
+    await updateDoc(userRef, updates);
+    console.log('User profile updated with new fields');
+    return { ...existingData, ...updates };
   }
 };
 
@@ -655,29 +671,37 @@ export const deleteComment = async (uid, commentId) => {
 export const getTopTraders = async (limitCount = 10) => {
   try {
     const usersRef = collection(db, 'users');
-    const q = query(usersRef, orderBy('reputationScore', 'desc'), limit(limitCount));
+    // Simple query without orderBy to avoid needing Firestore index
+    const q = query(usersRef, limit(50));
     const snapshot = await getDocs(q);
     
     const traders = [];
     snapshot.forEach(doc => {
       const data = doc.data();
-      // Only include non-anonymous users with some activity
-      if (!data.settings?.anonymousMode && data.totalVotes > 0) {
+      // Include users with any votes (even 0 initially to show new users)
+      const totalVotes = data.totalVotes || 0;
+      const isAnonymous = data.settings?.anonymousMode === true;
+      
+      if (!isAnonymous) {
         traders.push({
           uid: doc.id,
           displayName: data.displayName || data.email?.split('@')[0] || 'Trader',
-          totalVotes: data.totalVotes || 0,
+          totalVotes: totalVotes,
           accuracy: data.accuracy || 0,
           correctPredictions: data.correctPredictions || 0,
           streak: data.streak || 0,
           bestStreak: data.bestStreak || 0,
           followerCount: data.followerCount || 0,
-          reputationScore: data.reputationScore || 0,
+          reputationScore: data.reputationScore || totalVotes, // Fallback to totalVotes
         });
       }
     });
     
-    return traders;
+    // Sort by reputation score (or totalVotes as fallback) in JavaScript
+    traders.sort((a, b) => b.reputationScore - a.reputationScore || b.totalVotes - a.totalVotes);
+    
+    // Return top traders
+    return traders.slice(0, limitCount);
   } catch (error) {
     console.error('Error getting top traders:', error);
     return [];

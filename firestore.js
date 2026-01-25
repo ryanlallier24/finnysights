@@ -8,7 +8,15 @@ import {
   arrayUnion, 
   arrayRemove,
   serverTimestamp,
-  increment
+  increment,
+  collection,
+  addDoc,
+  query,
+  where,
+  orderBy,
+  limit,
+  getDocs,
+  deleteDoc
 } from 'firebase/firestore';
 
 // ============================================
@@ -40,8 +48,14 @@ export const createUserProfile = async (user) => {
       },
       // Empty watchlist to start
       watchlist: [],
-      // Voting history - now stores as object for easier lookup
+      // Voting history - stores as object for easier lookup
       votes: {},
+      // Social stats
+      followers: [],
+      following: [],
+      totalVotes: 0,
+      correctPredictions: 0,
+      reputation: 0,
     };
     
     await setDoc(userRef, userData);
@@ -115,7 +129,6 @@ export const removeFromWatchlist = async (uid, symbol) => {
   if (!uid || !symbol) return false;
   
   try {
-    // First get the current watchlist to find the exact item
     const userProfile = await getUserProfile(uid);
     if (!userProfile) return false;
     
@@ -191,16 +204,16 @@ export const recordVote = async (uid, symbol, vote) => {
     // Update user's vote record
     await updateDoc(userRef, {
       [`votes.${symbol}`]: {
-        vote: vote, // 'bullish' or 'bearish'
+        vote: vote,
         votedAt: new Date().toISOString(),
-      }
+      },
+      totalVotes: increment(previousVote ? 0 : 1)
     });
     
     // Update community vote totals
     const stockVotesSnap = await getDoc(stockVotesRef);
     
     if (!stockVotesSnap.exists()) {
-      // First vote for this stock - create document
       await setDoc(stockVotesRef, {
         symbol: symbol,
         bullish: vote === 'bullish' ? 1 : 0,
@@ -209,17 +222,14 @@ export const recordVote = async (uid, symbol, vote) => {
         lastUpdated: serverTimestamp(),
       });
     } else {
-      // Update existing totals
       const updates = {
         lastUpdated: serverTimestamp(),
       };
       
-      // If changing vote, decrement old vote
       if (previousVote && previousVote.vote !== vote) {
         updates[previousVote.vote] = increment(-1);
       }
       
-      // Increment new vote (only if it's a new vote or changed vote)
       if (!previousVote || previousVote.vote !== vote) {
         updates[vote] = increment(1);
         if (!previousVote) {
@@ -246,19 +256,16 @@ export const removeVote = async (uid, symbol) => {
     const userRef = doc(db, 'users', uid);
     const stockVotesRef = doc(db, 'stockVotes', symbol);
     
-    // Get user's current vote
     const userProfile = await getUserProfile(uid);
     const currentVotes = userProfile?.votes || {};
     const previousVote = currentVotes[symbol];
     
-    if (!previousVote) return true; // No vote to remove
+    if (!previousVote) return true;
     
-    // Remove user's vote record
     await updateDoc(userRef, {
       [`votes.${symbol}`]: null
     });
     
-    // Update community vote totals
     const stockVotesSnap = await getDoc(stockVotesRef);
     if (stockVotesSnap.exists()) {
       await updateDoc(stockVotesRef, {
@@ -302,15 +309,369 @@ export const getStockVotes = async (symbol) => {
   }
 };
 
-// Get community vote totals for multiple stocks
-export const getMultipleStockVotes = async (symbols) => {
-  if (!symbols || symbols.length === 0) return {};
+// ============================================
+// SOCIAL FEATURES - COMMENTS
+// ============================================
+
+// Add a comment to a stock
+export const addComment = async (uid, stockSymbol, content) => {
+  if (!uid || !stockSymbol || !content) return null;
   
-  const votes = {};
-  for (const symbol of symbols) {
-    votes[symbol] = await getStockVotes(symbol);
+  try {
+    const userProfile = await getUserProfile(uid);
+    if (!userProfile) return null;
+    
+    const commentData = {
+      uid: uid,
+      stockSymbol: stockSymbol,
+      content: content,
+      displayName: userProfile.settings?.anonymousMode ? 'Anonymous' : (userProfile.displayName || userProfile.email?.split('@')[0]),
+      isAnonymous: userProfile.settings?.anonymousMode || false,
+      createdAt: serverTimestamp(),
+      likes: [],
+      likesCount: 0,
+    };
+    
+    const commentsRef = collection(db, 'comments');
+    const docRef = await addDoc(commentsRef, commentData);
+    
+    console.log('Comment added:', docRef.id);
+    return { id: docRef.id, ...commentData, createdAt: new Date() };
+  } catch (error) {
+    console.error('Error adding comment:', error);
+    return null;
   }
-  return votes;
+};
+
+// Get comments for a stock
+export const getStockComments = async (stockSymbol, limitCount = 20) => {
+  if (!stockSymbol) return [];
+  
+  try {
+    const commentsRef = collection(db, 'comments');
+    const q = query(
+      commentsRef,
+      where('stockSymbol', '==', stockSymbol),
+      orderBy('createdAt', 'desc'),
+      limit(limitCount)
+    );
+    
+    const querySnapshot = await getDocs(q);
+    const comments = [];
+    
+    querySnapshot.forEach((doc) => {
+      comments.push({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+      });
+    });
+    
+    return comments;
+  } catch (error) {
+    console.error('Error getting comments:', error);
+    return [];
+  }
+};
+
+// Like a comment
+export const likeComment = async (uid, commentId) => {
+  if (!uid || !commentId) return false;
+  
+  try {
+    const commentRef = doc(db, 'comments', commentId);
+    await updateDoc(commentRef, {
+      likes: arrayUnion(uid),
+      likesCount: increment(1)
+    });
+    return true;
+  } catch (error) {
+    console.error('Error liking comment:', error);
+    return false;
+  }
+};
+
+// Unlike a comment
+export const unlikeComment = async (uid, commentId) => {
+  if (!uid || !commentId) return false;
+  
+  try {
+    const commentRef = doc(db, 'comments', commentId);
+    await updateDoc(commentRef, {
+      likes: arrayRemove(uid),
+      likesCount: increment(-1)
+    });
+    return true;
+  } catch (error) {
+    console.error('Error unliking comment:', error);
+    return false;
+  }
+};
+
+// Delete a comment (only owner)
+export const deleteComment = async (uid, commentId) => {
+  if (!uid || !commentId) return false;
+  
+  try {
+    const commentRef = doc(db, 'comments', commentId);
+    const commentSnap = await getDoc(commentRef);
+    
+    if (!commentSnap.exists()) return false;
+    if (commentSnap.data().uid !== uid) return false;
+    
+    await deleteDoc(commentRef);
+    return true;
+  } catch (error) {
+    console.error('Error deleting comment:', error);
+    return false;
+  }
+};
+
+// ============================================
+// SOCIAL FEATURES - FOLLOWING
+// ============================================
+
+// Follow a user
+export const followUser = async (currentUid, targetUid) => {
+  if (!currentUid || !targetUid || currentUid === targetUid) return false;
+  
+  try {
+    const currentUserRef = doc(db, 'users', currentUid);
+    const targetUserRef = doc(db, 'users', targetUid);
+    
+    // Add to current user's following
+    await updateDoc(currentUserRef, {
+      following: arrayUnion(targetUid)
+    });
+    
+    // Add to target user's followers
+    await updateDoc(targetUserRef, {
+      followers: arrayUnion(currentUid)
+    });
+    
+    console.log(`User ${currentUid} now following ${targetUid}`);
+    return true;
+  } catch (error) {
+    console.error('Error following user:', error);
+    return false;
+  }
+};
+
+// Unfollow a user
+export const unfollowUser = async (currentUid, targetUid) => {
+  if (!currentUid || !targetUid) return false;
+  
+  try {
+    const currentUserRef = doc(db, 'users', currentUid);
+    const targetUserRef = doc(db, 'users', targetUid);
+    
+    await updateDoc(currentUserRef, {
+      following: arrayRemove(targetUid)
+    });
+    
+    await updateDoc(targetUserRef, {
+      followers: arrayRemove(currentUid)
+    });
+    
+    console.log(`User ${currentUid} unfollowed ${targetUid}`);
+    return true;
+  } catch (error) {
+    console.error('Error unfollowing user:', error);
+    return false;
+  }
+};
+
+// Check if following
+export const isFollowing = async (currentUid, targetUid) => {
+  if (!currentUid || !targetUid) return false;
+  
+  try {
+    const userProfile = await getUserProfile(currentUid);
+    return userProfile?.following?.includes(targetUid) || false;
+  } catch (error) {
+    return false;
+  }
+};
+
+// Get user's followers
+export const getFollowers = async (uid) => {
+  if (!uid) return [];
+  
+  const userProfile = await getUserProfile(uid);
+  return userProfile?.followers || [];
+};
+
+// Get user's following
+export const getFollowing = async (uid) => {
+  if (!uid) return [];
+  
+  const userProfile = await getUserProfile(uid);
+  return userProfile?.following || [];
+};
+
+// ============================================
+// SOCIAL FEATURES - POSTS/ACTIVITY
+// ============================================
+
+// Create a post
+export const createPost = async (uid, content, stockSymbol = null, sentiment = null) => {
+  if (!uid || !content) return null;
+  
+  try {
+    const userProfile = await getUserProfile(uid);
+    if (!userProfile) return null;
+    
+    const postData = {
+      uid: uid,
+      content: content,
+      stockSymbol: stockSymbol,
+      sentiment: sentiment, // 'bullish', 'bearish', or null
+      displayName: userProfile.settings?.anonymousMode ? 'Anonymous' : (userProfile.displayName || userProfile.email?.split('@')[0]),
+      isAnonymous: userProfile.settings?.anonymousMode || false,
+      createdAt: serverTimestamp(),
+      likes: [],
+      likesCount: 0,
+      commentsCount: 0,
+    };
+    
+    const postsRef = collection(db, 'posts');
+    const docRef = await addDoc(postsRef, postData);
+    
+    console.log('Post created:', docRef.id);
+    return { id: docRef.id, ...postData, createdAt: new Date() };
+  } catch (error) {
+    console.error('Error creating post:', error);
+    return null;
+  }
+};
+
+// Get recent posts (global feed)
+export const getRecentPosts = async (limitCount = 20) => {
+  try {
+    const postsRef = collection(db, 'posts');
+    const q = query(
+      postsRef,
+      orderBy('createdAt', 'desc'),
+      limit(limitCount)
+    );
+    
+    const querySnapshot = await getDocs(q);
+    const posts = [];
+    
+    querySnapshot.forEach((doc) => {
+      posts.push({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+      });
+    });
+    
+    return posts;
+  } catch (error) {
+    console.error('Error getting posts:', error);
+    return [];
+  }
+};
+
+// Get posts for a specific stock
+export const getStockPosts = async (stockSymbol, limitCount = 20) => {
+  if (!stockSymbol) return [];
+  
+  try {
+    const postsRef = collection(db, 'posts');
+    const q = query(
+      postsRef,
+      where('stockSymbol', '==', stockSymbol),
+      orderBy('createdAt', 'desc'),
+      limit(limitCount)
+    );
+    
+    const querySnapshot = await getDocs(q);
+    const posts = [];
+    
+    querySnapshot.forEach((doc) => {
+      posts.push({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+      });
+    });
+    
+    return posts;
+  } catch (error) {
+    console.error('Error getting stock posts:', error);
+    return [];
+  }
+};
+
+// Like a post
+export const likePost = async (uid, postId) => {
+  if (!uid || !postId) return false;
+  
+  try {
+    const postRef = doc(db, 'posts', postId);
+    await updateDoc(postRef, {
+      likes: arrayUnion(uid),
+      likesCount: increment(1)
+    });
+    return true;
+  } catch (error) {
+    console.error('Error liking post:', error);
+    return false;
+  }
+};
+
+// Unlike a post
+export const unlikePost = async (uid, postId) => {
+  if (!uid || !postId) return false;
+  
+  try {
+    const postRef = doc(db, 'posts', postId);
+    await updateDoc(postRef, {
+      likes: arrayRemove(uid),
+      likesCount: increment(-1)
+    });
+    return true;
+  } catch (error) {
+    console.error('Error unliking post:', error);
+    return false;
+  }
+};
+
+// ============================================
+// LEADERBOARD FUNCTIONS
+// ============================================
+
+// Get top traders by vote count
+export const getLeaderboard = async (limitCount = 10) => {
+  try {
+    const usersRef = collection(db, 'users');
+    const q = query(
+      usersRef,
+      orderBy('totalVotes', 'desc'),
+      limit(limitCount)
+    );
+    
+    const querySnapshot = await getDocs(q);
+    const leaders = [];
+    
+    querySnapshot.forEach((doc) => {
+      const data = doc.data();
+      leaders.push({
+        uid: doc.id,
+        displayName: data.settings?.anonymousMode ? 'Anonymous' : (data.displayName || data.email?.split('@')[0]),
+        isAnonymous: data.settings?.anonymousMode || false,
+        totalVotes: data.totalVotes || 0,
+        followers: data.followers?.length || 0,
+        reputation: data.reputation || 0,
+      });
+    });
+    
+    return leaders;
+  } catch (error) {
+    console.error('Error getting leaderboard:', error);
+    return [];
+  }
 };
 
 // ============================================
@@ -328,7 +689,7 @@ export const addPriceAlert = async (uid, alert) => {
         id: Date.now().toString(),
         symbol: alert.symbol,
         targetPrice: alert.targetPrice,
-        condition: alert.condition, // 'above' or 'below'
+        condition: alert.condition,
         createdAt: new Date().toISOString(),
         triggered: false,
       })

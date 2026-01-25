@@ -7,7 +7,8 @@ import {
   updateDoc, 
   arrayUnion, 
   arrayRemove,
-  serverTimestamp 
+  serverTimestamp,
+  increment
 } from 'firebase/firestore';
 
 // ============================================
@@ -39,8 +40,8 @@ export const createUserProfile = async (user) => {
       },
       // Empty watchlist to start
       watchlist: [],
-      // Voting history
-      votes: [],
+      // Voting history - now stores as object for easier lookup
+      votes: {},
     };
     
     await setDoc(userRef, userData);
@@ -171,28 +172,145 @@ export const getUserSettings = async (uid) => {
 };
 
 // ============================================
-// VOTING FUNCTIONS
+// ENHANCED VOTING FUNCTIONS
 // ============================================
 
-// Record a user's vote on a stock
+// Record or update a user's vote on a stock
 export const recordVote = async (uid, symbol, vote) => {
   if (!uid || !symbol || !vote) return false;
   
   try {
     const userRef = doc(db, 'users', uid);
+    const stockVotesRef = doc(db, 'stockVotes', symbol);
+    
+    // Get user's current votes
+    const userProfile = await getUserProfile(uid);
+    const currentVotes = userProfile?.votes || {};
+    const previousVote = currentVotes[symbol];
+    
+    // Update user's vote record
     await updateDoc(userRef, {
-      votes: arrayUnion({
-        symbol: symbol,
+      [`votes.${symbol}`]: {
         vote: vote, // 'bullish' or 'bearish'
         votedAt: new Date().toISOString(),
-      })
+      }
     });
+    
+    // Update community vote totals
+    const stockVotesSnap = await getDoc(stockVotesRef);
+    
+    if (!stockVotesSnap.exists()) {
+      // First vote for this stock - create document
+      await setDoc(stockVotesRef, {
+        symbol: symbol,
+        bullish: vote === 'bullish' ? 1 : 0,
+        bearish: vote === 'bearish' ? 1 : 0,
+        totalVotes: 1,
+        lastUpdated: serverTimestamp(),
+      });
+    } else {
+      // Update existing totals
+      const updates = {
+        lastUpdated: serverTimestamp(),
+      };
+      
+      // If changing vote, decrement old vote
+      if (previousVote && previousVote.vote !== vote) {
+        updates[previousVote.vote] = increment(-1);
+      }
+      
+      // Increment new vote (only if it's a new vote or changed vote)
+      if (!previousVote || previousVote.vote !== vote) {
+        updates[vote] = increment(1);
+        if (!previousVote) {
+          updates.totalVotes = increment(1);
+        }
+      }
+      
+      await updateDoc(stockVotesRef, updates);
+    }
+    
     console.log(`Recorded ${vote} vote for ${symbol}`);
     return true;
   } catch (error) {
     console.error('Error recording vote:', error);
     return false;
   }
+};
+
+// Remove a user's vote on a stock
+export const removeVote = async (uid, symbol) => {
+  if (!uid || !symbol) return false;
+  
+  try {
+    const userRef = doc(db, 'users', uid);
+    const stockVotesRef = doc(db, 'stockVotes', symbol);
+    
+    // Get user's current vote
+    const userProfile = await getUserProfile(uid);
+    const currentVotes = userProfile?.votes || {};
+    const previousVote = currentVotes[symbol];
+    
+    if (!previousVote) return true; // No vote to remove
+    
+    // Remove user's vote record
+    await updateDoc(userRef, {
+      [`votes.${symbol}`]: null
+    });
+    
+    // Update community vote totals
+    const stockVotesSnap = await getDoc(stockVotesRef);
+    if (stockVotesSnap.exists()) {
+      await updateDoc(stockVotesRef, {
+        [previousVote.vote]: increment(-1),
+        totalVotes: increment(-1),
+        lastUpdated: serverTimestamp(),
+      });
+    }
+    
+    console.log(`Removed vote for ${symbol}`);
+    return true;
+  } catch (error) {
+    console.error('Error removing vote:', error);
+    return false;
+  }
+};
+
+// Get user's votes
+export const getUserVotes = async (uid) => {
+  if (!uid) return {};
+  
+  const userProfile = await getUserProfile(uid);
+  return userProfile?.votes || {};
+};
+
+// Get community vote totals for a stock
+export const getStockVotes = async (symbol) => {
+  if (!symbol) return null;
+  
+  try {
+    const stockVotesRef = doc(db, 'stockVotes', symbol);
+    const stockVotesSnap = await getDoc(stockVotesRef);
+    
+    if (stockVotesSnap.exists()) {
+      return stockVotesSnap.data();
+    }
+    return { bullish: 0, bearish: 0, totalVotes: 0 };
+  } catch (error) {
+    console.error('Error getting stock votes:', error);
+    return { bullish: 0, bearish: 0, totalVotes: 0 };
+  }
+};
+
+// Get community vote totals for multiple stocks
+export const getMultipleStockVotes = async (symbols) => {
+  if (!symbols || symbols.length === 0) return {};
+  
+  const votes = {};
+  for (const symbol of symbols) {
+    votes[symbol] = await getStockVotes(symbol);
+  }
+  return votes;
 };
 
 // ============================================

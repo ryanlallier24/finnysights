@@ -972,7 +972,7 @@ export default function FinnysightsLanding() {
               <a href="#" className="hover:text-white transition-colors">Contact</a>
               <a href="#" className="hover:text-white transition-colors">API Docs</a>
             </div>
-            <p className="text-sm text-slate-500">© 2024 finnysights. All rights reserved.</p>
+            <p className="text-sm text-slate-500">© 2026 finnysights. All rights reserved.</p>
           </div>
         </div>
       </footer>

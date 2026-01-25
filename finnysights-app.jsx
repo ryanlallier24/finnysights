@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, Search, Globe, BarChart3, MessageSquare, Users, Zap, ChevronRight, Star, Clock, Volume2, Eye, Filter, Bell, Settings, RefreshCw, Activity, Plus, X, Check, Heart, Trash2, LogOut, Wifi, WifiOff, Loader, Send, Trophy, UserPlus, UserMinus } from 'lucide-react';
+import { TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, Search, Globe, BarChart3, MessageSquare, Users, Zap, ChevronRight, Star, Clock, Volume2, Eye, Filter, Bell, Settings, RefreshCw, Activity, Plus, X, Check, Heart, Trash2, LogOut, Wifi, WifiOff, Loader, Send, Trophy, UserPlus, UserMinus, Target, Flame, Award } from 'lucide-react';
 import { auth } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { addToWatchlist, removeFromWatchlist, getWatchlist, recordVote, removeVote, getUserVotes, getUserProfile, addComment, getStockComments, likeComment, unlikeComment, createPost, getRecentPosts, likePost, unlikePost, getLeaderboard, followUser, unfollowUser } from './firestore.js';
+import { addToWatchlist, removeFromWatchlist, getWatchlist, recordVote, removeVote, getUserVotes, getUserProfile, addComment, getStockComments, likeComment, unlikeComment, getTopTraders, followUser, unfollowUser, checkPredictionAccuracy } from './firestore.js';
 import { getMultipleQuotes, getQuote, searchStocks } from './stockApi.js';
 
 // Thumbs Up Logo Component
@@ -37,15 +37,6 @@ const EXCHANGES = [
   { id: 'tse', name: 'TSE', country: 'JP', flag: '🇯🇵', status: 'closed', change: 1.24 },
   { id: 'sse', name: 'SSE', country: 'CN', flag: '🇨🇳', status: 'closed', change: -0.34 },
   { id: 'hkex', name: 'HKEX', country: 'HK', flag: '🇭🇰', status: 'closed', change: 0.89 },
-  { id: 'euronext', name: 'Euronext', country: 'EU', flag: '🇪🇺', status: 'open', change: 0.23 },
-  { id: 'asx', name: 'ASX', country: 'AU', flag: '🇦🇺', status: 'closed', change: -0.56 },
-];
-
-const SENTIMENT_SOURCES = [
-  { name: 'Reuters Analytics', score: 78, trend: 'up', reliability: 94 },
-  { name: 'Bloomberg Sentiment', score: 82, trend: 'up', reliability: 96 },
-  { name: 'S&P Market Intel', score: 71, trend: 'neutral', reliability: 92 },
-  { name: 'Refinitiv Data', score: 85, trend: 'up', reliability: 91 },
 ];
 
 // Avatars for users
@@ -64,14 +55,6 @@ const AnimatedBackground = () => (
             animationDelay: `${Math.random() * 2}s` }} />
       ))}
     </div>
-    <svg className="absolute inset-0 w-full h-full opacity-5">
-      <defs>
-        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" strokeWidth="0.5" className="text-cyan-500" />
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#grid)" />
-    </svg>
   </div>
 );
 
@@ -166,7 +149,7 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
     const voteValue = type === 'up' ? 'bullish' : 'bearish';
     if (userVote === voteValue) {
       setLocalVotes(prev => ({ up: type === 'up' ? prev.up - 1 : prev.up, down: type === 'down' ? prev.down - 1 : prev.down }));
-      await onVote(stock.ticker, null);
+      await onVote(stock.ticker, null, stock.price);
     } else {
       setLocalVotes(prev => {
         const newVotes = { ...prev };
@@ -176,7 +159,7 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
         if (type === 'down') newVotes.down += 1;
         return newVotes;
       });
-      await onVote(stock.ticker, voteValue);
+      await onVote(stock.ticker, voteValue, stock.price);
     }
     setIsVoting(false);
   };
@@ -267,18 +250,18 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
 // Comment component
 const CommentItem = ({ comment, currentUser, onLike }) => {
   const [liked, setLiked] = useState(comment.likes?.includes(currentUser?.uid));
-  const [likesCount, setLikesCount] = useState(comment.likesCount || 0);
+  const [likesCount, setLikesCount] = useState(comment.likeCount || 0);
 
   const handleLike = async () => {
     if (!currentUser) { alert('Please sign in to like!'); return; }
     if (liked) {
       setLiked(false);
       setLikesCount(prev => prev - 1);
-      await unlikeComment(currentUser.uid, comment.id);
+      await unlikeComment(currentUser.uid, comment.id, comment.uid);
     } else {
       setLiked(true);
       setLikesCount(prev => prev + 1);
-      await likeComment(currentUser.uid, comment.id);
+      await likeComment(currentUser.uid, comment.id, comment.uid);
     }
   };
 
@@ -344,7 +327,6 @@ const StockDetailPanel = ({ stock, onClose, userVote, isLoading, currentUser, co
         <button onClick={onClose} className="p-2 hover:bg-slate-700/50 rounded-lg"><X size={16} className="text-slate-400" /></button>
       </div>
       
-      {/* Price */}
       <div className="grid grid-cols-3 gap-4 mb-4 p-3 bg-slate-900/50 rounded-xl">
         {isLoading ? (
           <div className="col-span-3 text-center py-2"><RefreshCw size={20} className="animate-spin mx-auto text-cyan-400" /></div>
@@ -357,7 +339,6 @@ const StockDetailPanel = ({ stock, onClose, userVote, isLoading, currentUser, co
         )}
       </div>
 
-      {/* Sentiment */}
       <div className="mb-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-bold text-slate-300">Community Sentiment</span>
@@ -368,24 +349,18 @@ const StockDetailPanel = ({ stock, onClose, userVote, isLoading, currentUser, co
         <SentimentMeter score={stock.sentiment || 50} size="lg" />
       </div>
 
-      {/* Comments section */}
       <div className="border-t border-slate-700/50 pt-4">
         <h4 className="text-sm font-bold text-slate-300 flex items-center gap-2 mb-3">
           <MessageSquare size={14} className="text-purple-400" />
           Comments ({comments.length})
         </h4>
         
-        {/* Add comment */}
         {currentUser && (
           <div className="flex gap-2 mb-3">
-            <input
-              type="text"
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
+            <input type="text" value={newComment} onChange={(e) => setNewComment(e.target.value)}
               placeholder="Share your thoughts..."
               className="flex-1 px-3 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
-              onKeyDown={(e) => e.key === 'Enter' && handlePostComment()}
-            />
+              onKeyDown={(e) => e.key === 'Enter' && handlePostComment()} />
             <button onClick={handlePostComment} disabled={isPosting || !newComment.trim()}
               className="px-3 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 rounded-lg transition-colors">
               {isPosting ? <Loader size={16} className="animate-spin" /> : <Send size={16} />}
@@ -393,7 +368,6 @@ const StockDetailPanel = ({ stock, onClose, userVote, isLoading, currentUser, co
           </div>
         )}
         
-        {/* Comments list */}
         <div className="space-y-2 max-h-60 overflow-y-auto">
           {comments.length > 0 ? (
             comments.map(comment => <CommentItem key={comment.id} comment={comment} currentUser={currentUser} />)
@@ -406,170 +380,123 @@ const StockDetailPanel = ({ stock, onClose, userVote, isLoading, currentUser, co
   );
 };
 
-// Social Post component
-const PostItem = ({ post, currentUser, onLike }) => {
-  const [liked, setLiked] = useState(post.likes?.includes(currentUser?.uid));
-  const [likesCount, setLikesCount] = useState(post.likesCount || 0);
-
-  const handleLike = async () => {
-    if (!currentUser) { alert('Please sign in to like!'); return; }
-    if (liked) {
-      setLiked(false);
-      setLikesCount(prev => prev - 1);
-      await unlikePost(currentUser.uid, post.id);
-    } else {
-      setLiked(true);
-      setLikesCount(prev => prev + 1);
-      await likePost(currentUser.uid, post.id);
-    }
+// Enhanced Leaderboard with accuracy and reputation
+const Leaderboard = ({ leaders, currentUser, onFollow, followingList }) => {
+  const getRankBadge = (rank) => {
+    if (rank === 1) return { bg: 'bg-amber-500', icon: '🥇' };
+    if (rank === 2) return { bg: 'bg-slate-400', icon: '🥈' };
+    if (rank === 3) return { bg: 'bg-amber-700', icon: '🥉' };
+    return { bg: 'bg-slate-700', icon: rank };
   };
 
-  const timeAgo = (date) => {
-    const seconds = Math.floor((new Date() - date) / 1000);
-    if (seconds < 60) return 'just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
-    return `${Math.floor(seconds / 86400)}d`;
+  const getAccuracyColor = (accuracy) => {
+    if (accuracy >= 70) return 'text-emerald-400';
+    if (accuracy >= 50) return 'text-amber-400';
+    return 'text-rose-400';
   };
 
   return (
-    <div className="p-3 bg-slate-800/30 rounded-lg border border-slate-700/50 hover:border-purple-500/30 transition-all">
-      <div className="flex items-start gap-2">
-        <span className="text-2xl">{getAvatar(post.uid)}</span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-sm font-bold text-white">{post.displayName}</span>
-            {post.stockSymbol && (
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                post.sentiment === 'bullish' ? 'bg-emerald-500/20 text-emerald-400' :
-                post.sentiment === 'bearish' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-600/50 text-slate-400'
-              }`}>${post.stockSymbol}</span>
-            )}
-            <span className="text-[10px] text-slate-500 ml-auto flex items-center gap-1">
-              <Clock size={10} />{timeAgo(post.createdAt)}
-            </span>
-          </div>
-          <p className="text-xs text-slate-300 leading-relaxed">{post.content}</p>
-          <div className="flex items-center gap-3 mt-2">
-            <button onClick={handleLike} className={`text-[10px] flex items-center gap-1 transition-colors ${liked ? 'text-rose-400' : 'text-slate-500 hover:text-rose-400'}`}>
-              <Heart size={10} className={liked ? 'fill-rose-400' : ''} />{likesCount}
-            </button>
-            <button className="text-[10px] text-slate-500 hover:text-cyan-400 flex items-center gap-1">
-              <MessageSquare size={10} />Reply
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Social feed with post creation
-const SocialFeed = ({ posts, currentUser, onCreatePost, onRefreshPosts, isLoading }) => {
-  const [newPost, setNewPost] = useState('');
-  const [postStock, setPostStock] = useState('');
-  const [postSentiment, setPostSentiment] = useState(null);
-  const [isPosting, setIsPosting] = useState(false);
-
-  const handlePost = async () => {
-    if (!currentUser) { alert('Please sign in to post!'); return; }
-    if (!newPost.trim()) return;
-    setIsPosting(true);
-    await onCreatePost(newPost.trim(), postStock || null, postSentiment);
-    setNewPost('');
-    setPostStock('');
-    setPostSentiment(null);
-    setIsPosting(false);
-    onRefreshPosts();
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2">
-          <MessageSquare size={14} className="text-purple-400" />
-          Community Feed
-        </h3>
-        <button onClick={onRefreshPosts} className="p-1 hover:bg-slate-700/50 rounded">
-          <RefreshCw size={12} className={`text-slate-400 ${isLoading ? 'animate-spin' : ''}`} />
-        </button>
-      </div>
-
-      {/* Create post */}
-      {currentUser && (
-        <div className="p-3 bg-slate-800/50 rounded-xl border border-slate-700/50">
-          <textarea
-            value={newPost}
-            onChange={(e) => setNewPost(e.target.value)}
-            placeholder="Share your market insights..."
-            className="w-full px-3 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 resize-none"
-            rows={2}
-          />
-          <div className="flex items-center gap-2 mt-2">
-            <input
-              type="text"
-              value={postStock}
-              onChange={(e) => setPostStock(e.target.value.toUpperCase())}
-              placeholder="$AAPL"
-              className="w-20 px-2 py-1 bg-slate-900/50 border border-slate-700 rounded text-xs text-white placeholder-slate-500"
-            />
-            <button onClick={() => setPostSentiment(postSentiment === 'bullish' ? null : 'bullish')}
-              className={`p-1.5 rounded ${postSentiment === 'bullish' ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-400'}`}>
-              <ThumbsUp size={12} />
-            </button>
-            <button onClick={() => setPostSentiment(postSentiment === 'bearish' ? null : 'bearish')}
-              className={`p-1.5 rounded ${postSentiment === 'bearish' ? 'bg-rose-500 text-white' : 'bg-slate-700 text-slate-400'}`}>
-              <ThumbsDown size={12} />
-            </button>
-            <button onClick={handlePost} disabled={isPosting || !newPost.trim()}
-              className="ml-auto px-3 py-1.5 bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 disabled:opacity-50 rounded-lg text-xs font-bold transition-all">
-              {isPosting ? <Loader size={12} className="animate-spin" /> : 'Post'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Posts list */}
+    <div className="bg-slate-800/30 rounded-xl border border-slate-700/50 p-4">
+      <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2 mb-1">
+        <Trophy size={14} className="text-amber-400" />
+        Top Traders
+      </h3>
+      <p className="text-[10px] text-slate-500 mb-3">Ranked by accuracy, followers & engagement</p>
+      
       <div className="space-y-2">
-        {posts.map(post => <PostItem key={post.id} post={post} currentUser={currentUser} />)}
-        {posts.length === 0 && (
-          <p className="text-center text-slate-500 text-sm py-4">No posts yet. Be the first to share!</p>
+        {leaders.map((leader, i) => {
+          const rank = getRankBadge(i + 1);
+          const isFollowing = followingList?.includes(leader.uid);
+          
+          return (
+            <div key={leader.uid} className="p-2 rounded-lg bg-slate-900/30 hover:bg-slate-700/30 transition-colors">
+              <div className="flex items-center gap-2">
+                {/* Rank */}
+                <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${rank.bg} text-white`}>
+                  {typeof rank.icon === 'string' ? rank.icon : i + 1}
+                </span>
+                
+                {/* Avatar */}
+                <span className="text-lg">{getAvatar(leader.uid)}</span>
+                
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-white truncate">{leader.displayName}</p>
+                  <div className="flex items-center gap-2 text-[10px]">
+                    {/* Accuracy */}
+                    <span className={`flex items-center gap-0.5 ${getAccuracyColor(leader.accuracy)}`}>
+                      <Target size={10} />
+                      {leader.accuracy}%
+                    </span>
+                    {/* Streak */}
+                    {leader.streak > 0 && (
+                      <span className="flex items-center gap-0.5 text-orange-400">
+                        <Flame size={10} />
+                        {leader.streak}
+                      </span>
+                    )}
+                    {/* Followers */}
+                    <span className="text-slate-500">
+                      {leader.followerCount} followers
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Reputation Score */}
+                <div className="text-right">
+                  <p className="text-sm font-bold text-cyan-400">{leader.reputationScore}</p>
+                  <p className="text-[9px] text-slate-500">REP</p>
+                </div>
+                
+                {/* Follow button */}
+                {currentUser && currentUser.uid !== leader.uid && (
+                  <button onClick={() => onFollow(leader.uid)}
+                    className={`p-1.5 rounded transition-colors ${
+                      isFollowing 
+                        ? 'bg-slate-600 text-slate-400' 
+                        : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400'
+                    }`}>
+                    {isFollowing ? <Check size={12} /> : <UserPlus size={12} />}
+                  </button>
+                )}
+              </div>
+              
+              {/* Stats bar */}
+              <div className="mt-2 flex items-center gap-1">
+                <div className="flex-1 h-1 bg-slate-700/50 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-cyan-500 to-purple-500 transition-all"
+                    style={{ width: `${Math.min(leader.reputationScore, 100)}%` }}
+                  />
+                </div>
+                <span className="text-[9px] text-slate-500">{leader.totalVotes} votes</span>
+              </div>
+            </div>
+          );
+        })}
+        
+        {leaders.length === 0 && (
+          <div className="text-center py-4">
+            <Award size={24} className="mx-auto text-slate-600 mb-2" />
+            <p className="text-slate-500 text-sm">No traders yet</p>
+            <p className="text-slate-600 text-xs">Vote on stocks to join!</p>
+          </div>
         )}
       </div>
+      
+      {/* Scoring explanation */}
+      <div className="mt-3 p-2 bg-slate-900/50 rounded-lg">
+        <p className="text-[10px] text-slate-500 font-bold mb-1">How scores work:</p>
+        <div className="grid grid-cols-2 gap-1 text-[9px] text-slate-600">
+          <span>🎯 Accuracy: 50%</span>
+          <span>👥 Followers: 30%</span>
+          <span>❤️ Engagement: 20%</span>
+          <span>🔥 Streak bonus</span>
+        </div>
+      </div>
     </div>
   );
 };
-
-// Leaderboard component
-const Leaderboard = ({ leaders, currentUser, onFollow }) => (
-  <div className="bg-slate-800/30 rounded-xl border border-slate-700/50 p-4">
-    <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2 mb-3">
-      <Trophy size={14} className="text-amber-400" />
-      Top Traders
-    </h3>
-    <div className="space-y-2">
-      {leaders.map((leader, i) => (
-        <div key={leader.uid} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-700/30 transition-colors">
-          <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-            i === 0 ? 'bg-amber-500 text-white' : i === 1 ? 'bg-slate-400 text-white' : i === 2 ? 'bg-amber-700 text-white' : 'bg-slate-700 text-slate-400'
-          }`}>{i + 1}</span>
-          <span className="text-lg">{getAvatar(leader.uid)}</span>
-          <div className="flex-1">
-            <p className="text-sm font-bold text-white">{leader.displayName}</p>
-            <p className="text-[10px] text-slate-500">{leader.totalVotes} votes • {leader.followers} followers</p>
-          </div>
-          {currentUser && currentUser.uid !== leader.uid && (
-            <button onClick={() => onFollow(leader.uid)}
-              className="p-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 rounded text-cyan-400 transition-colors">
-              <UserPlus size={12} />
-            </button>
-          )}
-        </div>
-      ))}
-      {leaders.length === 0 && <p className="text-center text-slate-500 text-sm py-2">No leaders yet</p>}
-    </div>
-  </div>
-);
 
 // Main App
 export default function Finnysights() {
@@ -580,6 +507,7 @@ export default function Finnysights() {
   const [currentUser, setCurrentUser] = useState(null);
   const [watchlist, setWatchlist] = useState([]);
   const [userVotes, setUserVotes] = useState({});
+  const [userProfile, setUserProfile] = useState(null);
   const [isLoadingWatchlist, setIsLoadingWatchlist] = useState(false);
   
   const [stocks, setStocks] = useState(DEFAULT_STOCKS.map(s => ({ ...s, price: 0, change: 0, high: 0, low: 0, open: 0 })));
@@ -593,19 +521,8 @@ export default function Finnysights() {
   const searchRef = useRef(null);
   const searchTimeoutRef = useRef(null);
 
-  // Social state
-  const [posts, setPosts] = useState([]);
   const [comments, setComments] = useState([]);
   const [leaders, setLeaders] = useState([]);
-  const [isLoadingPosts, setIsLoadingPosts] = useState(false);
-
-  // Fetch posts
-  const fetchPosts = useCallback(async () => {
-    setIsLoadingPosts(true);
-    const recentPosts = await getRecentPosts(20);
-    setPosts(recentPosts);
-    setIsLoadingPosts(false);
-  }, []);
 
   // Fetch comments for selected stock
   const fetchComments = useCallback(async (symbol) => {
@@ -616,15 +533,9 @@ export default function Finnysights() {
 
   // Fetch leaderboard
   const fetchLeaderboard = useCallback(async () => {
-    const topLeaders = await getLeaderboard(5);
+    const topLeaders = await getTopTraders(5);
     setLeaders(topLeaders);
   }, []);
-
-  // Handle post creation
-  const handleCreatePost = async (content, stockSymbol, sentiment) => {
-    if (!currentUser) return;
-    await createPost(currentUser.uid, content, stockSymbol, sentiment);
-  };
 
   // Handle comment creation
   const handleAddComment = async (stockSymbol, content) => {
@@ -632,12 +543,36 @@ export default function Finnysights() {
     await addComment(currentUser.uid, stockSymbol, content);
   };
 
-  // Handle follow
+  // Handle follow/unfollow
   const handleFollow = async (targetUid) => {
     if (!currentUser) return;
-    await followUser(currentUser.uid, targetUid);
+    const isCurrentlyFollowing = userProfile?.following?.includes(targetUid);
+    
+    if (isCurrentlyFollowing) {
+      await unfollowUser(currentUser.uid, targetUid);
+    } else {
+      await followUser(currentUser.uid, targetUid);
+    }
+    
+    // Refresh user profile and leaderboard
+    const updatedProfile = await getUserProfile(currentUser.uid);
+    setUserProfile(updatedProfile);
     fetchLeaderboard();
   };
+
+  // Check prediction accuracy when prices update
+  const checkPredictions = useCallback(async () => {
+    if (!currentUser || !stocks.length) return;
+    
+    for (const stock of stocks) {
+      if (stock.price > 0 && userVotes[stock.ticker]) {
+        await checkPredictionAccuracy(currentUser.uid, stock.ticker, stock.price);
+      }
+    }
+    
+    // Refresh leaderboard after checking predictions
+    fetchLeaderboard();
+  }, [currentUser, stocks, userVotes, fetchLeaderboard]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -692,13 +627,20 @@ export default function Finnysights() {
     setIsLoadingPrices(false);
   }, [stocks]);
 
+  // Initial data fetch
   useEffect(() => {
     fetchPrices();
-    fetchPosts();
     fetchLeaderboard();
     const interval = setInterval(fetchPrices, 60000);
     return () => clearInterval(interval);
   }, []);
+
+  // Check predictions when prices update
+  useEffect(() => {
+    if (!isLoadingPrices && currentUser) {
+      checkPredictions();
+    }
+  }, [isLoadingPrices, currentUser, checkPredictions]);
 
   useEffect(() => {
     if (selectedStock) fetchComments(selectedStock.ticker);
@@ -709,12 +651,15 @@ export default function Finnysights() {
       setCurrentUser(user);
       if (user) {
         setIsLoadingWatchlist(true);
+        const profile = await getUserProfile(user.uid);
+        setUserProfile(profile);
         const userWatchlist = await getWatchlist(user.uid);
         setWatchlist(userWatchlist || []);
         const votes = await getUserVotes(user.uid);
         setUserVotes(votes || {});
         setIsLoadingWatchlist(false);
       } else {
+        setUserProfile(null);
         setWatchlist([]);
         setUserVotes({});
       }
@@ -741,15 +686,18 @@ export default function Finnysights() {
     }
   };
 
-  const handleVote = async (ticker, vote) => {
+  // Updated vote handler that passes price
+  const handleVote = async (ticker, vote, price) => {
     if (!currentUser) return;
     if (vote === null) {
       await removeVote(currentUser.uid, ticker);
       setUserVotes(prev => { const updated = { ...prev }; delete updated[ticker]; return updated; });
     } else {
-      await recordVote(currentUser.uid, ticker, vote);
-      setUserVotes(prev => ({ ...prev, [ticker]: { vote, votedAt: new Date().toISOString() } }));
+      await recordVote(currentUser.uid, ticker, vote, price);
+      setUserVotes(prev => ({ ...prev, [ticker]: { vote, votedAt: new Date().toISOString(), priceAtVote: price } }));
     }
+    // Refresh leaderboard
+    setTimeout(fetchLeaderboard, 1000);
   };
 
   const getUserVoteForStock = (ticker) => userVotes[ticker]?.vote || null;
@@ -896,9 +844,12 @@ export default function Finnysights() {
               </div>
             )}
             
-            <Leaderboard leaders={leaders} currentUser={currentUser} onFollow={handleFollow} />
-            
-            <SocialFeed posts={posts} currentUser={currentUser} onCreatePost={handleCreatePost} onRefreshPosts={fetchPosts} isLoading={isLoadingPosts} />
+            <Leaderboard 
+              leaders={leaders} 
+              currentUser={currentUser} 
+              onFollow={handleFollow}
+              followingList={userProfile?.following || []}
+            />
           </div>
         </div>
       </main>

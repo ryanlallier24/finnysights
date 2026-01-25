@@ -1,5 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, Users, Globe, Zap, BarChart3, Shield, Bell, ChevronRight, Eye, EyeOff, Check, Star, ArrowRight, Play, Lock, Mail, User, Building, Phone } from 'lucide-react';
+import { auth, googleProvider } from './firebase.js';
+import { 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, 
+  signInWithPopup,
+  sendPasswordResetEmail,
+  onAuthStateChanged,
+  signOut
+} from 'firebase/auth';
 
 // Thumbs Up Logo Component
 const ThumbsUpLogo = ({ size = 22, className = "" }) => (
@@ -11,6 +20,16 @@ const ThumbsUpLogo = ({ size = 22, className = "" }) => (
       strokeLinecap="round"
       strokeLinejoin="round"
     />
+  </svg>
+);
+
+// Google Icon Component
+const GoogleIcon = ({ size = 18 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24">
+    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
   </svg>
 );
 
@@ -98,14 +117,14 @@ const LiveTicker = () => {
   ];
 
   return (
-    <div className="overflow-hidden bg-slate-900/50 border-y border-slate-800/50">
-      <div className="flex animate-scroll">
-        {[...tickers, ...tickers].map((t, i) => (
-          <div key={i} className="flex items-center gap-3 px-6 py-2 border-r border-slate-800/50 whitespace-nowrap">
-            <span className="font-bold text-white">{t.symbol}</span>
-            <span className="font-mono text-sm text-slate-300">${t.price}</span>
-            <span className={`font-mono text-sm ${t.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {t.change >= 0 ? '+' : ''}{t.change}%
+    <div className="w-full bg-slate-900/50 border-y border-slate-800 overflow-hidden">
+      <div className="animate-scroll flex gap-12 py-3 whitespace-nowrap">
+        {[...tickers, ...tickers].map((ticker, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <span className="font-bold text-white">{ticker.symbol}</span>
+            <span className="text-slate-300 font-mono">${ticker.price}</span>
+            <span className={`font-mono ${ticker.change > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {ticker.change > 0 ? '+' : ''}{ticker.change}%
             </span>
           </div>
         ))}
@@ -114,94 +133,59 @@ const LiveTicker = () => {
   );
 };
 
-// Feature card
-const FeatureCard = ({ icon: Icon, title, description, color }) => (
-  <div className="group relative p-6 bg-slate-800/30 backdrop-blur-sm rounded-2xl border border-slate-700/50 hover:border-cyan-500/30 transition-all duration-500 hover:transform hover:scale-105">
-    <div className={`absolute inset-0 bg-gradient-to-br ${color} opacity-0 group-hover:opacity-5 rounded-2xl transition-opacity duration-500`} />
-    <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center mb-4 shadow-lg`}>
-      <Icon size={24} className="text-white" />
-    </div>
-    <h3 className="text-lg font-bold text-white mb-2">{title}</h3>
-    <p className="text-sm text-slate-400 leading-relaxed">{description}</p>
-  </div>
-);
-
-// Testimonial card
-const TestimonialCard = ({ quote, author, role, avatar }) => (
-  <div className="p-6 bg-slate-800/20 backdrop-blur-sm rounded-2xl border border-slate-700/50">
-    <div className="flex gap-1 mb-4">
-      {[...Array(5)].map((_, i) => (
-        <Star key={i} size={16} className="text-amber-400 fill-amber-400" />
-      ))}
-    </div>
-    <p className="text-slate-300 mb-4 italic">"{quote}"</p>
-    <div className="flex items-center gap-3">
-      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-400 to-purple-500 flex items-center justify-center text-lg">
-        {avatar}
-      </div>
-      <div>
-        <p className="font-semibold text-white">{author}</p>
-        <p className="text-xs text-slate-500">{role}</p>
-      </div>
-    </div>
-  </div>
-);
-
-// Stat counter
-const StatCounter = ({ value, label, suffix = '' }) => {
-  const [count, setCount] = useState(0);
+// Sentiment Card Component
+const SentimentCard = ({ symbol, name, sentiment, price, change, votes }) => {
+  const isPositive = change >= 0;
+  const sentimentColor = sentiment >= 70 ? 'emerald' : sentiment >= 40 ? 'amber' : 'red';
   
-  useEffect(() => {
-    const target = parseInt(value);
-    const increment = target / 50;
-    const timer = setInterval(() => {
-      setCount(prev => {
-        if (prev >= target) {
-          clearInterval(timer);
-          return target;
-        }
-        return Math.min(prev + increment, target);
-      });
-    }, 30);
-    return () => clearInterval(timer);
-  }, [value]);
-
   return (
-    <div className="text-center">
-      <p className="text-4xl font-black bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
-        {Math.floor(count).toLocaleString()}{suffix}
-      </p>
-      <p className="text-sm text-slate-400 mt-1">{label}</p>
+    <div className="bg-slate-800/50 backdrop-blur-sm rounded-2xl p-5 border border-slate-700/50 hover:border-cyan-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/10 hover:-translate-y-1">
+      <div className="flex justify-between items-start mb-4">
+        <div>
+          <h4 className="font-bold text-white text-lg">{symbol}</h4>
+          <p className="text-slate-400 text-sm">{name}</p>
+        </div>
+        <div className={`px-3 py-1 rounded-full bg-${sentimentColor}-500/20 border border-${sentimentColor}-500/30`}>
+          <span className={`text-${sentimentColor}-400 font-bold text-sm`}>{sentiment}%</span>
+        </div>
+      </div>
+      
+      <div className="flex justify-between items-end">
+        <div>
+          <p className="text-2xl font-bold text-white font-mono">${price}</p>
+          <div className={`flex items-center gap-1 ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+            {isPositive ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+            <span className="text-sm font-mono">{isPositive ? '+' : ''}{change}%</span>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-slate-500">Community Votes</p>
+          <p className="text-slate-300 font-bold">{votes.toLocaleString()}</p>
+        </div>
+      </div>
     </div>
   );
 };
 
-// Auth Modal
-const AuthModal = ({ isOpen, onClose, initialMode = 'login' }) => {
+// Auth Modal Component with Firebase Integration
+const AuthModal = ({ isOpen, onClose, initialMode = 'login', onAuthSuccess }) => {
   const [mode, setMode] = useState(initialMode);
   const [showPassword, setShowPassword] = useState(false);
-  const [resetStep, setResetStep] = useState(1); // 1: enter email, 2: enter code, 3: new password
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     confirmPassword: '',
-    firstName: '',
-    lastName: '',
-    company: '',
-    phone: '',
+    displayName: '',
     agreeTerms: false,
-    marketingEmails: false,
-    resetCode: '',
-    newPassword: '',
-    confirmNewPassword: '',
   });
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [firebaseError, setFirebaseError] = useState('');
 
   useEffect(() => {
     setMode(initialMode);
-    setResetStep(1);
+    setFirebaseError('');
   }, [initialMode]);
 
   const handleChange = (e) => {
@@ -213,33 +197,17 @@ const AuthModal = ({ isOpen, onClose, initialMode = 'login' }) => {
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: null }));
     }
+    setFirebaseError('');
   };
 
   const validateForm = () => {
     const newErrors = {};
     
     if (mode === 'reset') {
-      if (resetStep === 1) {
-        if (!formData.email) {
-          newErrors.email = 'Email is required';
-        } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-          newErrors.email = 'Please enter a valid email';
-        }
-      } else if (resetStep === 2) {
-        if (!formData.resetCode) {
-          newErrors.resetCode = 'Verification code is required';
-        } else if (formData.resetCode.length !== 6) {
-          newErrors.resetCode = 'Code must be 6 digits';
-        }
-      } else if (resetStep === 3) {
-        if (!formData.newPassword) {
-          newErrors.newPassword = 'New password is required';
-        } else if (formData.newPassword.length < 8) {
-          newErrors.newPassword = 'Password must be at least 8 characters';
-        }
-        if (formData.newPassword !== formData.confirmNewPassword) {
-          newErrors.confirmNewPassword = 'Passwords do not match';
-        }
+      if (!formData.email) {
+        newErrors.email = 'Email is required';
+      } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+        newErrors.email = 'Please enter a valid email';
       }
     } else {
       if (!formData.email) {
@@ -268,43 +236,164 @@ const AuthModal = ({ isOpen, onClose, initialMode = 'login' }) => {
     return Object.keys(newErrors).length === 0;
   };
 
+  // Firebase: Sign up with email/password
+  const handleSignUp = async () => {
+    try {
+      const userCredential = await createUserWithEmailAndPassword(
+        auth, 
+        formData.email, 
+        formData.password
+      );
+      console.log('User created:', userCredential.user);
+      return true;
+    } catch (error) {
+      console.error('Signup error:', error);
+      switch (error.code) {
+        case 'auth/email-already-in-use':
+          setFirebaseError('This email is already registered. Try logging in instead.');
+          break;
+        case 'auth/weak-password':
+          setFirebaseError('Password is too weak. Please use a stronger password.');
+          break;
+        case 'auth/invalid-email':
+          setFirebaseError('Please enter a valid email address.');
+          break;
+        default:
+          setFirebaseError('An error occurred. Please try again.');
+      }
+      return false;
+    }
+  };
+
+  // Firebase: Sign in with email/password
+  const handleSignIn = async () => {
+    try {
+      const userCredential = await signInWithEmailAndPassword(
+        auth, 
+        formData.email, 
+        formData.password
+      );
+      console.log('User signed in:', userCredential.user);
+      return true;
+    } catch (error) {
+      console.error('Login error:', error);
+      switch (error.code) {
+        case 'auth/user-not-found':
+          setFirebaseError('No account found with this email.');
+          break;
+        case 'auth/wrong-password':
+          setFirebaseError('Incorrect password. Please try again.');
+          break;
+        case 'auth/invalid-email':
+          setFirebaseError('Please enter a valid email address.');
+          break;
+        case 'auth/too-many-requests':
+          setFirebaseError('Too many failed attempts. Please try again later.');
+          break;
+        case 'auth/invalid-credential':
+          setFirebaseError('Invalid email or password. Please try again.');
+          break;
+        default:
+          setFirebaseError('An error occurred. Please try again.');
+      }
+      return false;
+    }
+  };
+
+  // Firebase: Sign in with Google
+  const handleGoogleSignIn = async () => {
+    setIsLoading(true);
+    setFirebaseError('');
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      console.log('Google sign in:', result.user);
+      setSuccess(true);
+      setTimeout(() => {
+        setSuccess(false);
+        onClose();
+        if (onAuthSuccess) onAuthSuccess(result.user);
+      }, 1500);
+    } catch (error) {
+      console.error('Google sign in error:', error);
+      if (error.code === 'auth/popup-closed-by-user') {
+        setFirebaseError('Sign in was cancelled.');
+      } else {
+        setFirebaseError('Could not sign in with Google. Please try again.');
+      }
+    }
+    setIsLoading(false);
+  };
+
+  // Firebase: Password reset
+  const handlePasswordReset = async () => {
+    try {
+      await sendPasswordResetEmail(auth, formData.email);
+      return true;
+    } catch (error) {
+      console.error('Password reset error:', error);
+      switch (error.code) {
+        case 'auth/user-not-found':
+          setFirebaseError('No account found with this email.');
+          break;
+        case 'auth/invalid-email':
+          setFirebaseError('Please enter a valid email address.');
+          break;
+        default:
+          setFirebaseError('An error occurred. Please try again.');
+      }
+      return false;
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
     
     setIsLoading(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    setIsLoading(false);
+    setFirebaseError('');
+    
+    let success = false;
     
     if (mode === 'reset') {
-      if (resetStep === 1) {
-        setResetStep(2);
-      } else if (resetStep === 2) {
-        setResetStep(3);
-      } else {
+      success = await handlePasswordReset();
+      if (success) {
         setSuccess(true);
         setTimeout(() => {
           setSuccess(false);
           setMode('login');
-          setResetStep(1);
-          setFormData(prev => ({ ...prev, resetCode: '', newPassword: '', confirmNewPassword: '' }));
-        }, 2000);
+          setFormData(prev => ({ ...prev, email: formData.email }));
+        }, 3000);
+      }
+    } else if (mode === 'signup') {
+      success = await handleSignUp();
+      if (success) {
+        setSuccess(true);
+        setTimeout(() => {
+          setSuccess(false);
+          onClose();
+          if (onAuthSuccess) onAuthSuccess(auth.currentUser);
+        }, 1500);
       }
     } else {
-      setSuccess(true);
-      setTimeout(() => {
-        setSuccess(false);
-        onClose();
-      }, 2000);
+      success = await handleSignIn();
+      if (success) {
+        setSuccess(true);
+        setTimeout(() => {
+          setSuccess(false);
+          onClose();
+          if (onAuthSuccess) onAuthSuccess(auth.currentUser);
+        }, 1500);
+      }
     }
+    
+    setIsLoading(false);
   };
 
   const handleBackToLogin = () => {
     setMode('login');
-    setResetStep(1);
-    setFormData(prev => ({ ...prev, resetCode: '', newPassword: '', confirmNewPassword: '' }));
+    setFormData(prev => ({ ...prev, email: '' }));
     setErrors({});
+    setFirebaseError('');
   };
 
   if (!isOpen) return null;
@@ -339,16 +428,16 @@ const AuthModal = ({ isOpen, onClose, initialMode = 'login' }) => {
                 <Check size={40} className="text-emerald-400" />
               </div>
               <h3 className="text-2xl font-bold text-white mb-2">
-                {mode === 'login' ? 'Welcome Back!' : mode === 'signup' ? 'Account Created!' : 'Password Reset!'}
+                {mode === 'login' ? 'Welcome Back!' : mode === 'signup' ? 'Account Created!' : 'Email Sent!'}
               </h3>
               <p className="text-slate-400">
-                {mode === 'login' ? 'Redirecting to dashboard...' : mode === 'signup' ? 'Check your email to verify your account.' : 'Your password has been updated successfully.'}
+                {mode === 'login' ? 'Redirecting to dashboard...' : mode === 'signup' ? 'Welcome to finnysights!' : 'Check your email for a password reset link.'}
               </p>
             </div>
           ) : (
             <>
               {/* Header */}
-              <div className="text-center mb-8">
+              <div className="text-center mb-6">
                 <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-2xl flex items-center justify-center shadow-lg shadow-cyan-500/25">
                   <ThumbsUpLogo size={32} className="text-white" />
                 </div>
@@ -360,38 +449,45 @@ const AuthModal = ({ isOpen, onClose, initialMode = 'login' }) => {
                     ? 'Sign in to access your trading dashboard' 
                     : mode === 'signup'
                     ? 'Join thousands of traders worldwide'
-                    : resetStep === 1 
-                    ? 'Enter your email to receive a reset code'
-                    : resetStep === 2
-                    ? 'Enter the 6-digit code sent to your email'
-                    : 'Create a new password for your account'}
+                    : 'Enter your email to receive a reset link'}
                 </p>
               </div>
 
-              {/* Password Reset Progress */}
-              {mode === 'reset' && (
-                <div className="flex items-center justify-center gap-2 mb-6">
-                  {[1, 2, 3].map((step) => (
-                    <div key={step} className="flex items-center">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
-                        resetStep >= step 
-                          ? 'bg-cyan-500 text-white' 
-                          : 'bg-slate-700 text-slate-400'
-                      }`}>
-                        {resetStep > step ? <Check size={16} /> : step}
-                      </div>
-                      {step < 3 && (
-                        <div className={`w-8 h-0.5 ${resetStep > step ? 'bg-cyan-500' : 'bg-slate-700'}`} />
-                      )}
-                    </div>
-                  ))}
+              {/* Firebase Error Message */}
+              {firebaseError && (
+                <div className="mb-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg">
+                  <p className="text-red-400 text-sm text-center">{firebaseError}</p>
                 </div>
+              )}
+
+              {/* Google Sign In Button */}
+              {mode !== 'reset' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignIn}
+                    disabled={isLoading}
+                    className="w-full py-3 px-4 bg-white hover:bg-gray-100 text-gray-800 font-semibold rounded-xl flex items-center justify-center gap-3 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <GoogleIcon />
+                    Continue with Google
+                  </button>
+                  
+                  <div className="relative my-6">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-slate-700"></div>
+                    </div>
+                    <div className="relative flex justify-center text-sm">
+                      <span className="px-4 bg-slate-900 text-slate-500">or continue with email</span>
+                    </div>
+                  </div>
+                </>
               )}
 
               {/* Form */}
               <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Password Reset Step 1: Email */}
-                {mode === 'reset' && resetStep === 1 && (
+                {/* Password Reset: Email */}
+                {mode === 'reset' && (
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 mb-1.5">Email Address</label>
                     <div className="relative">
@@ -401,336 +497,146 @@ const AuthModal = ({ isOpen, onClose, initialMode = 'login' }) => {
                         name="email"
                         value={formData.email}
                         onChange={handleChange}
-                        placeholder="you@example.com"
-                        className={`w-full pl-10 pr-4 py-3 bg-slate-800/50 border rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition-all ${
-                          errors.email ? 'border-rose-500' : 'border-slate-700/50 focus:border-cyan-500/50'
-                        }`}
+                        placeholder="Enter your email"
+                        className={`w-full pl-10 pr-4 py-3 bg-slate-800/50 border ${errors.email ? 'border-red-500' : 'border-slate-700'} rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors`}
                       />
                     </div>
-                    {errors.email && <p className="text-xs text-rose-400 mt-1">{errors.email}</p>}
+                    {errors.email && <p className="mt-1 text-xs text-red-400">{errors.email}</p>}
                   </div>
                 )}
 
-                {/* Password Reset Step 2: Verification Code */}
-                {mode === 'reset' && resetStep === 2 && (
+                {/* Login/Signup: Email */}
+                {mode !== 'reset' && (
                   <div>
-                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Verification Code</label>
-                    <p className="text-xs text-slate-500 mb-3">We sent a 6-digit code to {formData.email}</p>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Email Address</label>
+                    <div className="relative">
+                      <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                      <input
+                        type="email"
+                        name="email"
+                        value={formData.email}
+                        onChange={handleChange}
+                        placeholder="Enter your email"
+                        className={`w-full pl-10 pr-4 py-3 bg-slate-800/50 border ${errors.email ? 'border-red-500' : 'border-slate-700'} rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors`}
+                      />
+                    </div>
+                    {errors.email && <p className="mt-1 text-xs text-red-400">{errors.email}</p>}
+                  </div>
+                )}
+
+                {/* Password */}
+                {mode !== 'reset' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Password</label>
                     <div className="relative">
                       <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                       <input
-                        type="text"
-                        name="resetCode"
-                        value={formData.resetCode}
+                        type={showPassword ? 'text' : 'password'}
+                        name="password"
+                        value={formData.password}
                         onChange={handleChange}
-                        placeholder="000000"
-                        maxLength={6}
-                        className={`w-full pl-10 pr-4 py-3 bg-slate-800/50 border rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition-all font-mono text-center text-lg tracking-widest ${
-                          errors.resetCode ? 'border-rose-500' : 'border-slate-700/50 focus:border-cyan-500/50'
-                        }`}
+                        placeholder="Enter your password"
+                        className={`w-full pl-10 pr-10 py-3 bg-slate-800/50 border ${errors.password ? 'border-red-500' : 'border-slate-700'} rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      >
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                    {errors.password && <p className="mt-1 text-xs text-red-400">{errors.password}</p>}
+                  </div>
+                )}
+
+                {/* Confirm Password (Signup only) */}
+                {mode === 'signup' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Confirm Password</label>
+                    <div className="relative">
+                      <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        name="confirmPassword"
+                        value={formData.confirmPassword}
+                        onChange={handleChange}
+                        placeholder="Confirm your password"
+                        className={`w-full pl-10 pr-4 py-3 bg-slate-800/50 border ${errors.confirmPassword ? 'border-red-500' : 'border-slate-700'} rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors`}
                       />
                     </div>
-                    {errors.resetCode && <p className="text-xs text-rose-400 mt-1">{errors.resetCode}</p>}
-                    <p className="text-xs text-slate-500 mt-3">
-                      Didn't receive the code? <button type="button" className="text-cyan-400 hover:underline">Resend code</button>
-                    </p>
+                    {errors.confirmPassword && <p className="mt-1 text-xs text-red-400">{errors.confirmPassword}</p>}
                   </div>
                 )}
 
-                {/* Password Reset Step 3: New Password */}
-                {mode === 'reset' && resetStep === 3 && (
-                  <>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">New Password</label>
-                      <div className="relative">
-                        <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                        <input
-                          type={showPassword ? 'text' : 'password'}
-                          name="newPassword"
-                          value={formData.newPassword}
-                          onChange={handleChange}
-                          placeholder="Enter new password"
-                          className={`w-full pl-10 pr-12 py-3 bg-slate-800/50 border rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition-all ${
-                            errors.newPassword ? 'border-rose-500' : 'border-slate-700/50 focus:border-cyan-500/50'
-                          }`}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
-                        >
-                          {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                        </button>
-                      </div>
-                      {errors.newPassword && <p className="text-xs text-rose-400 mt-1">{errors.newPassword}</p>}
-                      <p className="text-xs text-slate-500 mt-1">Must be at least 8 characters</p>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Confirm New Password</label>
-                      <div className="relative">
-                        <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                        <input
-                          type={showPassword ? 'text' : 'password'}
-                          name="confirmNewPassword"
-                          value={formData.confirmNewPassword}
-                          onChange={handleChange}
-                          placeholder="Confirm new password"
-                          className={`w-full pl-10 pr-4 py-3 bg-slate-800/50 border rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition-all ${
-                            errors.confirmNewPassword ? 'border-rose-500' : 'border-slate-700/50 focus:border-cyan-500/50'
-                          }`}
-                        />
-                      </div>
-                      {errors.confirmNewPassword && <p className="text-xs text-rose-400 mt-1">{errors.confirmNewPassword}</p>}
-                    </div>
-                  </>
-                )}
-
-                {/* Login/Signup fields */}
-                {mode !== 'reset' && mode === 'signup' && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">First Name <span className="text-slate-600">(optional)</span></label>
-                      <div className="relative">
-                        <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                        <input
-                          type="text"
-                          name="firstName"
-                          value={formData.firstName}
-                          onChange={handleChange}
-                          className={`w-full pl-10 pr-4 py-2.5 bg-slate-800/50 border rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-all ${
-                            errors.firstName ? 'border-rose-500' : 'border-slate-700/50 focus:border-cyan-500/50'
-                          }`}
-                          placeholder="John"
-                        />
-                      </div>
-                      {errors.firstName && <p className="text-xs text-rose-400 mt-1">{errors.firstName}</p>}
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Last Name <span className="text-slate-600">(optional)</span></label>
-                      <div className="relative">
-                        <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                        <input
-                          type="text"
-                          name="lastName"
-                          value={formData.lastName}
-                          onChange={handleChange}
-                          className={`w-full pl-10 pr-4 py-2.5 bg-slate-800/50 border rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-all ${
-                            errors.lastName ? 'border-rose-500' : 'border-slate-700/50 focus:border-cyan-500/50'
-                          }`}
-                          placeholder="Doe"
-                        />
-                      </div>
-                      {errors.lastName && <p className="text-xs text-rose-400 mt-1">{errors.lastName}</p>}
-                    </div>
-                  </div>
-                )}
-
-                {/* Email/Password for login/signup only */}
-                {mode !== 'reset' && (
-                  <>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Email Address</label>
-                      <div className="relative">
-                        <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                        <input
-                          type="email"
-                          name="email"
-                          value={formData.email}
-                          onChange={handleChange}
-                          className={`w-full pl-10 pr-4 py-2.5 bg-slate-800/50 border rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-all ${
-                            errors.email ? 'border-rose-500' : 'border-slate-700/50 focus:border-cyan-500/50'
-                          }`}
-                          placeholder="you@example.com"
-                        />
-                      </div>
-                      {errors.email && <p className="text-xs text-rose-400 mt-1">{errors.email}</p>}
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Password</label>
-                      <div className="relative">
-                        <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                        <input
-                          type={showPassword ? 'text' : 'password'}
-                          name="password"
-                          value={formData.password}
-                          onChange={handleChange}
-                          className={`w-full pl-10 pr-12 py-2.5 bg-slate-800/50 border rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-all ${
-                            errors.password ? 'border-rose-500' : 'border-slate-700/50 focus:border-cyan-500/50'
-                          }`}
-                          placeholder="••••••••"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
-                        >
-                          {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                        </button>
-                      </div>
-                      {errors.password && <p className="text-xs text-rose-400 mt-1">{errors.password}</p>}
-                    </div>
-                  </>
-                )}
-
+                {/* Terms Agreement (Signup only) */}
                 {mode === 'signup' && (
-                  <>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Confirm Password</label>
-                      <div className="relative">
-                        <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                        <input
-                          type={showPassword ? 'text' : 'password'}
-                          name="confirmPassword"
-                          value={formData.confirmPassword}
-                          onChange={handleChange}
-                          className={`w-full pl-10 pr-4 py-2.5 bg-slate-800/50 border rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-all ${
-                            errors.confirmPassword ? 'border-rose-500' : 'border-slate-700/50 focus:border-cyan-500/50'
-                          }`}
-                          placeholder="••••••••"
-                        />
-                      </div>
-                      {errors.confirmPassword && <p className="text-xs text-rose-400 mt-1">{errors.confirmPassword}</p>}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-400 mb-1.5">Company (Optional)</label>
-                        <div className="relative">
-                          <Building size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                          <input
-                            type="text"
-                            name="company"
-                            value={formData.company}
-                            onChange={handleChange}
-                            className="w-full pl-10 pr-4 py-2.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/50 transition-all"
-                            placeholder="Acme Inc."
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-400 mb-1.5">Phone (Optional)</label>
-                        <div className="relative">
-                          <Phone size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                          <input
-                            type="tel"
-                            name="phone"
-                            value={formData.phone}
-                            onChange={handleChange}
-                            className="w-full pl-10 pr-4 py-2.5 bg-slate-800/50 border border-slate-700/50 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/50 transition-all"
-                            placeholder="+1 (555) 000-0000"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3 pt-2">
-                      <label className="flex items-start gap-3 cursor-pointer group">
-                        <div className="relative mt-0.5">
-                          <input
-                            type="checkbox"
-                            name="agreeTerms"
-                            checked={formData.agreeTerms}
-                            onChange={handleChange}
-                            className="sr-only"
-                          />
-                          <div className={`w-5 h-5 rounded border-2 transition-all flex items-center justify-center ${
-                            formData.agreeTerms 
-                              ? 'bg-cyan-500 border-cyan-500' 
-                              : errors.agreeTerms 
-                                ? 'border-rose-500' 
-                                : 'border-slate-600 group-hover:border-slate-500'
-                          }`}>
-                            {formData.agreeTerms && <Check size={12} className="text-white" />}
-                          </div>
-                        </div>
-                        <span className="text-xs text-slate-400">
-                          I agree to the <a href="#" className="text-cyan-400 hover:underline">Terms of Service</a> and <a href="#" className="text-cyan-400 hover:underline">Privacy Policy</a>
-                        </span>
-                      </label>
-                      {errors.agreeTerms && <p className="text-xs text-rose-400">{errors.agreeTerms}</p>}
-
-                      <label className="flex items-start gap-3 cursor-pointer group">
-                        <div className="relative mt-0.5">
-                          <input
-                            type="checkbox"
-                            name="marketingEmails"
-                            checked={formData.marketingEmails}
-                            onChange={handleChange}
-                            className="sr-only"
-                          />
-                          <div className={`w-5 h-5 rounded border-2 transition-all flex items-center justify-center ${
-                            formData.marketingEmails 
-                              ? 'bg-cyan-500 border-cyan-500' 
-                              : 'border-slate-600 group-hover:border-slate-500'
-                          }`}>
-                            {formData.marketingEmails && <Check size={12} className="text-white" />}
-                          </div>
-                        </div>
-                        <span className="text-xs text-slate-400">
-                          Send me market updates and trading insights
-                        </span>
-                      </label>
-                    </div>
-                  </>
-                )}
-
-                {mode === 'login' && (
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-2 cursor-pointer group">
-                      <div className="relative">
-                        <input type="checkbox" className="sr-only" />
-                        <div className="w-4 h-4 rounded border-2 border-slate-600 group-hover:border-slate-500 transition-all" />
-                      </div>
-                      <span className="text-xs text-slate-400">Remember me</span>
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      name="agreeTerms"
+                      checked={formData.agreeTerms}
+                      onChange={handleChange}
+                      className="mt-1 w-4 h-4 rounded border-slate-700 bg-slate-800 text-cyan-500 focus:ring-cyan-500"
+                    />
+                    <label className="text-xs text-slate-400">
+                      I agree to the <a href="#" className="text-cyan-400 hover:underline">Terms of Service</a> and <a href="#" className="text-cyan-400 hover:underline">Privacy Policy</a>
                     </label>
-                    <button 
+                  </div>
+                )}
+                {errors.agreeTerms && <p className="text-xs text-red-400">{errors.agreeTerms}</p>}
+
+                {/* Forgot Password Link */}
+                {mode === 'login' && (
+                  <div className="text-right">
+                    <button
                       type="button"
                       onClick={() => setMode('reset')}
-                      className="text-xs text-cyan-400 hover:underline"
+                      className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
                     >
                       Forgot password?
                     </button>
                   </div>
                 )}
 
+                {/* Submit Button */}
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full py-3 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-xl font-bold text-white hover:from-cyan-400 hover:to-blue-400 transition-all duration-300 shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="w-full py-3 bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 text-white font-bold rounded-xl transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? (
                     <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   ) : (
                     <>
-                      {mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Create Account' : resetStep === 1 ? 'Send Reset Code' : resetStep === 2 ? 'Verify Code' : 'Reset Password'}
+                      {mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Create Account' : 'Send Reset Link'}
                       <ArrowRight size={18} />
                     </>
                   )}
                 </button>
               </form>
 
-              {/* Toggle mode / Back to login */}
-              <p className="text-center text-sm text-slate-400 mt-6">
+              {/* Mode Switch */}
+              <div className="mt-6 text-center">
                 {mode === 'reset' ? (
                   <button
                     onClick={handleBackToLogin}
-                    className="text-cyan-400 font-semibold hover:underline flex items-center gap-1 mx-auto"
+                    className="text-sm text-slate-400 hover:text-white transition-colors"
                   >
                     ← Back to sign in
                   </button>
                 ) : (
-                  <>
+                  <p className="text-sm text-slate-400">
                     {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
                     <button
                       onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
-                      className="text-cyan-400 font-semibold hover:underline"
+                      className="text-cyan-400 hover:text-cyan-300 font-semibold transition-colors"
                     >
-                      {mode === 'login' ? 'Sign up free' : 'Sign in'}
+                      {mode === 'login' ? 'Sign up' : 'Sign in'}
                     </button>
-                  </>
+                  </p>
                 )}
-              </p>
+              </div>
             </>
           )}
         </div>
@@ -739,525 +645,359 @@ const AuthModal = ({ isOpen, onClose, initialMode = 'login' }) => {
   );
 };
 
-// Main Landing Page
-export default function FinnysightsLanding() {
-  const [authModal, setAuthModal] = useState({ isOpen: false, mode: 'login' });
+// Feature Card Component
+const FeatureCard = ({ icon: Icon, title, description }) => (
+  <div className="bg-slate-800/30 backdrop-blur-sm rounded-2xl p-6 border border-slate-700/50 hover:border-cyan-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/10">
+    <div className="w-12 h-12 bg-gradient-to-br from-cyan-400/20 to-purple-500/20 rounded-xl flex items-center justify-center mb-4 border border-cyan-500/20">
+      <Icon size={24} className="text-cyan-400" />
+    </div>
+    <h3 className="text-lg font-bold text-white mb-2">{title}</h3>
+    <p className="text-slate-400 text-sm leading-relaxed">{description}</p>
+  </div>
+);
 
-  const openLogin = () => setAuthModal({ isOpen: true, mode: 'login' });
-  const openSignup = () => setAuthModal({ isOpen: true, mode: 'signup' });
-  const closeAuth = () => setAuthModal({ isOpen: false, mode: 'login' });
+// Main Landing Page Component
+export default function FinnysightsLanding() {
+  const [authModal, setAuthModal] = useState({ open: false, mode: 'login' });
+  const [currentUser, setCurrentUser] = useState(null);
+
+  // Listen for auth state changes
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      console.log('Auth state changed:', user);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleAuthSuccess = (user) => {
+    console.log('Auth success:', user);
+    // You can redirect to dashboard here
+    // window.location.href = '/app';
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      console.log('User signed out');
+    } catch (error) {
+      console.error('Sign out error:', error);
+    }
+  };
+
+  const openAuthModal = (mode) => {
+    setAuthModal({ open: true, mode });
+  };
+
+  const sentimentData = [
+    { symbol: 'NVDA', name: 'NVIDIA Corp', sentiment: 87, price: '487.23', change: 4.56, votes: 12453 },
+    { symbol: 'AAPL', name: 'Apple Inc', sentiment: 72, price: '178.42', change: 1.23, votes: 9876 },
+    { symbol: 'TSLA', name: 'Tesla Inc', sentiment: 45, price: '245.67', change: -2.34, votes: 15234 },
+  ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white overflow-x-hidden">
+    <div className="min-h-screen text-white overflow-x-hidden">
       <AnimatedBackground />
       
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@400;600;700;900&display=swap');
-        
-        * {
-          font-family: 'Outfit', sans-serif;
-        }
-        
-        .font-mono {
-          font-family: 'JetBrains Mono', monospace;
-        }
-        
-        @keyframes float {
-          0%, 100% { transform: translateY(0) rotate(0deg); opacity: 0.4; }
-          50% { transform: translateY(-20px) rotate(180deg); opacity: 0.8; }
-        }
-        
-        @keyframes scroll {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-        
-        .animate-scroll {
-          animation: scroll 30s linear infinite;
-        }
-        
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(40px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .animate-slideUp {
-          animation: slideUp 0.8s ease-out forwards;
-        }
-        
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        
-        .animate-fadeIn {
-          animation: fadeIn 0.5s ease-out forwards;
-        }
-        
-        @keyframes modalIn {
-          from { opacity: 0; transform: scale(0.95) translateY(20px); }
-          to { opacity: 1; transform: scale(1) translateY(0); }
-        }
-        
-        .animate-modalIn {
-          animation: modalIn 0.3s ease-out forwards;
-        }
-        
-        ::-webkit-scrollbar {
-          width: 8px;
-        }
-        
-        ::-webkit-scrollbar-track {
-          background: rgba(30, 41, 59, 0.5);
-        }
-        
-        ::-webkit-scrollbar-thumb {
-          background: rgba(6, 182, 212, 0.3);
-          border-radius: 4px;
-        }
-        
-        ::-webkit-scrollbar-thumb:hover {
-          background: rgba(6, 182, 212, 0.5);
-        }
-      `}</style>
-
-      <div className="relative z-10">
-        {/* Navigation */}
-        <nav className="fixed top-0 left-0 right-0 z-40 bg-slate-950/80 backdrop-blur-xl border-b border-slate-800/50">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-16">
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-xl flex items-center justify-center shadow-lg shadow-cyan-500/25">
-                    <ThumbsUpLogo size={22} className="text-white" />
-                  </div>
-                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-slate-950 animate-pulse" />
-                </div>
-                <span className="text-xl font-black tracking-tight bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
-                  finnysights
-                </span>
+      {/* Navigation */}
+      <nav className="fixed top-0 left-0 right-0 z-40 bg-slate-900/80 backdrop-blur-lg border-b border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center gap-2">
+              <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-xl flex items-center justify-center">
+                <ThumbsUpLogo size={22} className="text-white" />
               </div>
-
-              <div className="hidden md:flex items-center gap-8">
-                <a href="#features" className="text-sm text-slate-400 hover:text-white transition-colors">Features</a>
-                <a href="#why-free" className="text-sm text-slate-400 hover:text-white transition-colors">Why Free?</a>
-                <a href="#testimonials" className="text-sm text-slate-400 hover:text-white transition-colors">Reviews</a>
-                <a href="#" className="text-sm text-slate-400 hover:text-white transition-colors">API</a>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <button 
-                  onClick={openLogin}
-                  className="px-4 py-2 text-sm font-semibold text-slate-300 hover:text-white transition-colors"
-                >
-                  Log In
-                </button>
-                <button 
-                  onClick={openSignup}
-                  className="px-5 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-lg font-semibold text-sm text-white hover:from-cyan-400 hover:to-blue-400 transition-all shadow-lg shadow-cyan-500/25"
-                >
-                  Start Free
-                </button>
-              </div>
+              <span className="text-xl font-black tracking-tight">finnysights</span>
+            </div>
+            
+            <div className="hidden md:flex items-center gap-8">
+              <a href="#features" className="text-slate-300 hover:text-white transition-colors text-sm font-medium">Features</a>
+              <a href="#why-free" className="text-slate-300 hover:text-white transition-colors text-sm font-medium">Why Free?</a>
+              <a href="#reviews" className="text-slate-300 hover:text-white transition-colors text-sm font-medium">Reviews</a>
+              <a href="#api" className="text-slate-300 hover:text-white transition-colors text-sm font-medium">API</a>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              {currentUser ? (
+                <>
+                  <span className="text-sm text-slate-400 hidden sm:block">
+                    {currentUser.email}
+                  </span>
+                  <button 
+                    onClick={handleSignOut}
+                    className="px-4 py-2 text-sm font-semibold text-slate-300 hover:text-white transition-colors"
+                  >
+                    Sign Out
+                  </button>
+                  <a 
+                    href="/app"
+                    className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg text-sm font-semibold hover:from-cyan-400 hover:to-purple-400 transition-all"
+                  >
+                    Dashboard
+                  </a>
+                </>
+              ) : (
+                <>
+                  <button 
+                    onClick={() => openAuthModal('login')}
+                    className="px-4 py-2 text-sm font-semibold text-slate-300 hover:text-white transition-colors"
+                  >
+                    Log In
+                  </button>
+                  <button 
+                    onClick={() => openAuthModal('signup')}
+                    className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg text-sm font-semibold hover:from-cyan-400 hover:to-purple-400 transition-all"
+                  >
+                    Start Free
+                  </button>
+                </>
+              )}
             </div>
           </div>
-        </nav>
-
-        {/* Live Ticker */}
-        <div className="pt-16">
-          <LiveTicker />
         </div>
+      </nav>
 
-        {/* Hero Section */}
-        <section className="pt-20 pb-32 px-4">
-          <div className="max-w-7xl mx-auto">
-            <div className="max-w-4xl mx-auto text-center">
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-cyan-500/10 border border-cyan-500/30 rounded-full mb-8 animate-slideUp">
+      {/* Live Ticker */}
+      <div className="pt-16">
+        <LiveTicker />
+      </div>
+
+      {/* Hero Section */}
+      <section className="relative pt-20 pb-32 px-4">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid lg:grid-cols-2 gap-12 items-center">
+            <div className="space-y-8">
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-cyan-500/10 border border-cyan-500/30 rounded-full">
                 <Zap size={14} className="text-cyan-400" />
-                <span className="text-sm text-cyan-400 font-semibold">Real-time sentiment from 8+ global exchanges</span>
+                <span className="text-cyan-400 text-sm font-medium">Real-time sentiment from 8+ global exchanges</span>
               </div>
               
-              <h1 className="text-5xl sm:text-6xl lg:text-7xl font-black leading-tight mb-6 animate-slideUp" style={{ animationDelay: '0.1s' }}>
+              <h1 className="text-5xl lg:text-7xl font-black leading-tight">
                 Trade Smarter with{' '}
-                <span className="bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-cyan-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent">
                   Crowd Intelligence
                 </span>
               </h1>
               
-              <p className="text-xl text-slate-400 mb-10 max-w-2xl mx-auto animate-slideUp" style={{ animationDelay: '0.2s' }}>
+              <p className="text-xl text-slate-300 leading-relaxed max-w-xl">
                 Harness real-time sentiment analysis from thousands of traders. Get institutional-grade market insights powered by community wisdom and AI.
               </p>
               
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 animate-slideUp" style={{ animationDelay: '0.3s' }}>
+              <div className="flex flex-col sm:flex-row gap-4">
                 <button 
-                  onClick={openSignup}
-                  className="group px-8 py-4 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-xl font-bold text-lg text-white hover:from-cyan-400 hover:to-blue-400 transition-all duration-300 shadow-xl shadow-cyan-500/30 hover:shadow-cyan-500/50 flex items-center gap-2"
+                  onClick={() => openAuthModal('signup')}
+                  className="group px-8 py-4 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-xl text-lg font-bold hover:from-cyan-400 hover:to-purple-400 transition-all flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/25"
                 >
                   Free Always
                   <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
                 </button>
-                <button className="group px-8 py-4 bg-slate-800/50 border border-slate-700/50 rounded-xl font-bold text-lg text-white hover:bg-slate-800 hover:border-slate-600 transition-all flex items-center gap-2">
+                <button className="group px-8 py-4 bg-slate-800/50 border border-slate-700 rounded-xl text-lg font-semibold hover:bg-slate-800 hover:border-slate-600 transition-all flex items-center justify-center gap-2">
                   <Play size={20} className="text-cyan-400" />
                   Watch Demo
                 </button>
               </div>
-
-              {/* Trust badges */}
-              <div className="flex items-center justify-center gap-8 mt-12 animate-slideUp" style={{ animationDelay: '0.4s' }}>
-                <div className="flex items-center gap-2 text-slate-500">
-                  <Users size={16} className="text-cyan-400" />
-                  <span className="text-xs">250K+ active traders</span>
-                </div>
-                <div className="flex items-center gap-2 text-slate-500">
-                  <Globe size={16} className="text-purple-400" />
-                  <span className="text-xs">8 global exchanges</span>
-                </div>
-              </div>
-            </div>
-
-            {/* App preview mockup */}
-            <div className="mt-20 relative">
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent z-10 pointer-events-none" />
-              <div className="relative mx-auto max-w-5xl">
-                <div className="bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-700/50 overflow-hidden shadow-2xl shadow-cyan-500/10">
-                  {/* Window controls */}
-                  <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-800/50">
-                    <div className="w-3 h-3 rounded-full bg-rose-500" />
-                    <div className="w-3 h-3 rounded-full bg-amber-500" />
-                    <div className="w-3 h-3 rounded-full bg-emerald-500" />
-                    <div className="flex-1 text-center">
-                      <span className="text-xs text-slate-500">finnysights.io/dashboard</span>
-                    </div>
-                  </div>
-                  {/* Dashboard preview */}
-                  <div className="p-6 space-y-4">
-                    <div className="grid grid-cols-4 gap-4">
-                      {['NVDA', 'AAPL', 'TSLA', 'MSFT'].map((ticker, i) => (
-                        <div key={ticker} className="p-4 bg-slate-800/50 rounded-xl border border-slate-700/30">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="font-bold text-white">{ticker}</span>
-                            <span className={`text-xs ${i === 2 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                              {i === 2 ? '-3.12%' : `+${(Math.random() * 5).toFixed(2)}%`}
-                            </span>
-                          </div>
-                          <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                            <div 
-                              className={`h-full ${i === 2 ? 'bg-rose-500' : 'bg-emerald-500'}`}
-                              style={{ width: `${60 + Math.random() * 30}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="col-span-2 h-48 bg-slate-800/50 rounded-xl border border-slate-700/30 flex items-center justify-center">
-                        <div className="text-slate-600 flex items-center gap-2">
-                          <BarChart3 size={24} />
-                          <span>Sentiment Chart</span>
-                        </div>
-                      </div>
-                      <div className="h-48 bg-slate-800/50 rounded-xl border border-slate-700/30 p-4">
-                        <div className="text-xs text-slate-500 mb-3">Community Votes</div>
-                        <div className="space-y-2">
-                          {[92, 78, 65, 43].map((v, i) => (
-                            <div key={i} className="flex items-center gap-2">
-                              <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                                <div className="h-full bg-emerald-500" style={{ width: `${v}%` }} />
-                              </div>
-                              <span className="text-xs text-slate-400 w-8">{v}%</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Stats Section */}
-        <section className="py-20 border-y border-slate-800/50 bg-slate-900/30">
-          <div className="max-w-7xl mx-auto px-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-              <StatCounter value="250000" label="Active Traders" suffix="+" />
-              <StatCounter value="1200000" label="Daily Votes" suffix="+" />
-              <StatCounter value="8" label="Global Exchanges" />
-              <StatCounter value="99" label="Uptime" suffix="%" />
-            </div>
-          </div>
-        </section>
-
-        {/* Features Section */}
-        <section id="features" className="py-24 px-4">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 className="text-4xl font-black mb-4">
-                Everything You Need to{' '}
-                <span className="bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">Trade Confidently</span>
-              </h2>
-              <p className="text-slate-400 max-w-2xl mx-auto">
-                Professional-grade tools and insights, accessible to every trader
-              </p>
-            </div>
-
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <FeatureCard
-                icon={Globe}
-                title="Global Exchange Coverage"
-                description="Track sentiment across NYSE, NASDAQ, LSE, TSE, SSE, HKEX, Euronext, and ASX in real-time."
-                color="from-cyan-500 to-blue-500"
-              />
-              <FeatureCard
-                icon={BarChart3}
-                title="AI Sentiment Analysis"
-                description="Institutional-grade sentiment scoring powered by machine learning and natural language processing."
-                color="from-purple-500 to-pink-500"
-              />
-              <FeatureCard
-                icon={Users}
-                title="Community Wisdom"
-                description="Vote on stocks and see real-time sentiment from our community of 250,000+ active traders."
-                color="from-emerald-500 to-teal-500"
-              />
-              <FeatureCard
-                icon={Zap}
-                title="Real-Time Data"
-                description="Sub-second updates on prices, sentiment shifts, and community voting trends."
-                color="from-amber-500 to-orange-500"
-              />
-              <FeatureCard
-                icon={Shield}
-                title="Third-Party Validation"
-                description="Cross-reference with Reuters, Bloomberg, and S&P for confidence in your trades."
-                color="from-rose-500 to-red-500"
-              />
-              <FeatureCard
-                icon={Bell}
-                title="Smart Alerts"
-                description="Custom notifications for sentiment shifts, price movements, and community activity."
-                color="from-indigo-500 to-violet-500"
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* Testimonials */}
-        <section id="testimonials" className="py-24 px-4 bg-slate-900/30">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 className="text-4xl font-black mb-4">Trusted by Traders Worldwide</h2>
-              <p className="text-slate-400">See what our community has to say</p>
-            </div>
-
-            <div className="grid md:grid-cols-3 gap-6">
-              <TestimonialCard
-                quote="finnysights has completely changed how I approach trading. The sentiment data is incredibly accurate."
-                author="Sarah Chen"
-                role="Day Trader, New York"
-                avatar="👩‍💼"
-              />
-              <TestimonialCard
-                quote="Finally, a platform that combines social sentiment with institutional-grade analysis. Game changer!"
-                author="Michael Torres"
-                role="Portfolio Manager, London"
-                avatar="👨‍💻"
-              />
-              <TestimonialCard
-                quote="The community voting feature gives me an edge I never had before. Can't believe this is free!"
-                author="Emma Watson"
-                role="Retail Investor, Sydney"
-                avatar="👩‍🦰"
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* 100% Free Section */}
-        <section id="why-free" className="py-24 px-4">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-16">
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-full mb-6">
-                <Zap size={14} className="text-emerald-400" />
-                <span className="text-sm text-emerald-400 font-semibold">100% Free Forever</span>
-              </div>
-              <h2 className="text-4xl font-black mb-4">
-                Every Feature.{' '}
-                <span className="bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Zero Cost.</span>
-              </h2>
-              <p className="text-slate-400 max-w-2xl mx-auto">
-                We believe everyone deserves access to professional trading tools. That's why finnysights is completely free—no hidden fees, no premium tiers, no catch.
-              </p>
-            </div>
-
-            {/* Single Free Plan Card */}
-            <div className="max-w-2xl mx-auto">
-              <div className="p-10 bg-gradient-to-b from-emerald-500/10 via-cyan-500/10 to-purple-500/10 rounded-3xl border border-emerald-500/30 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl" />
-                <div className="absolute bottom-0 left-0 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl" />
-                
-                <div className="relative z-10">
-                  <div className="text-center mb-8">
-                    <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500/20 rounded-full mb-4">
-                      <span className="text-emerald-400 font-bold">FULL ACCESS</span>
-                    </div>
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                      <span className="text-6xl font-black text-white">$0</span>
-                      <span className="text-slate-400 text-xl">/forever</span>
-                    </div>
-                    <p className="text-slate-400">No credit card required. Ever.</p>
-                  </div>
-
-                  <div className="grid md:grid-cols-2 gap-4 mb-8">
-                    {[
-                      'Unlimited watchlist stocks',
-                      'All 8 global exchanges',
-                      'Real-time sentiment data',
-                      'Third-party source breakdown',
-                      'Community voting & posts',
-                      'Unlimited price alerts',
-                      'Full historical data',
-                      'API access (10K calls/day)',
-                      'All chart timeframes',
-                      'SMS & push notifications',
-                      'Custom themes',
-                      'Priority support'
-                    ].map((feature, i) => (
-                      <div key={i} className="flex items-center gap-3">
-                        <div className="w-5 h-5 bg-emerald-500/20 rounded-full flex items-center justify-center shrink-0">
-                          <Check size={12} className="text-emerald-400" />
-                        </div>
-                        <span className="text-slate-300">{feature}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <button 
-                    onClick={openSignup}
-                    className="w-full py-4 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-xl font-bold text-lg text-white hover:from-emerald-400 hover:to-cyan-400 transition-all shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2"
-                  >
-                    Get Started — It's Free
-                    <ArrowRight size={20} />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Why Free? */}
-            <div className="mt-16 max-w-3xl mx-auto">
-              <h3 className="text-xl font-bold text-center text-white mb-8">Why is finnysights free?</h3>
-              <div className="grid md:grid-cols-3 gap-6">
-                <div className="text-center p-6">
-                  <div className="w-12 h-12 bg-cyan-500/20 rounded-xl flex items-center justify-center mx-auto mb-4">
-                    <Users size={24} className="text-cyan-400" />
-                  </div>
-                  <h4 className="font-semibold text-white mb-2">Community Driven</h4>
-                  <p className="text-sm text-slate-400">Our sentiment data gets better with more users. You make us better.</p>
-                </div>
-                <div className="text-center p-6">
-                  <div className="w-12 h-12 bg-purple-500/20 rounded-xl flex items-center justify-center mx-auto mb-4">
-                    <Shield size={24} className="text-purple-400" />
-                  </div>
-                  <h4 className="font-semibold text-white mb-2">Democratize Trading</h4>
-                  <p className="text-sm text-slate-400">Professional tools shouldn't be locked behind paywalls.</p>
-                </div>
-                <div className="text-center p-6">
-                  <div className="w-12 h-12 bg-emerald-500/20 rounded-xl flex items-center justify-center mx-auto mb-4">
-                    <TrendingUp size={24} className="text-emerald-400" />
-                  </div>
-                  <h4 className="font-semibold text-white mb-2">Mission Focused</h4>
-                  <p className="text-sm text-slate-400">We're funded to help traders succeed, not to maximize revenue.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* CTA Section */}
-        <section className="py-24 px-4">
-          <div className="max-w-4xl mx-auto text-center">
-            <div className="p-12 bg-gradient-to-br from-cyan-500/10 via-purple-500/10 to-blue-500/10 rounded-3xl border border-slate-700/50 relative overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/5 to-purple-500/5" />
-              <div className="relative z-10">
-                <h2 className="text-4xl font-black mb-4">Ready to Trade Smarter?</h2>
-                <p className="text-slate-400 mb-8 max-w-xl mx-auto">
-                  Join 250,000+ traders using finnysights to make better-informed decisions. It's completely free.
-                </p>
-                <button 
-                  onClick={openSignup}
-                  className="group px-8 py-4 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-xl font-bold text-lg text-white hover:from-cyan-400 hover:to-blue-400 transition-all duration-300 shadow-xl shadow-cyan-500/30 hover:shadow-cyan-500/50 flex items-center gap-2 mx-auto"
-                >
-                  Create Free Account
-                  <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
-                </button>
-                <p className="text-xs text-slate-500 mt-4">No credit card required • Free forever</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Footer */}
-        <footer className="border-t border-slate-800/50 py-12 px-4">
-          <div className="max-w-7xl mx-auto">
-            <div className="grid md:grid-cols-5 gap-8 mb-12">
-              <div className="md:col-span-2">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-xl flex items-center justify-center">
-                    <ThumbsUpLogo size={22} className="text-white" />
-                  </div>
-                  <span className="text-xl font-black bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
-                    finnysights
-                  </span>
-                </div>
-                <p className="text-sm text-slate-400 mb-4 max-w-xs">
-                  Real-time sentiment analysis and community intelligence for smarter trading decisions.
-                </p>
-                <div className="flex gap-4">
-                  {['twitter', 'linkedin', 'github', 'discord'].map(s => (
-                    <a key={s} href="#" className="w-8 h-8 bg-slate-800/50 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 transition-all">
-                      <span className="text-xs uppercase">{s[0]}</span>
-                    </a>
-                  ))}
-                </div>
-              </div>
               
-              {[
-                { title: 'Product', links: ['Features', 'Why Free?', 'API', 'Integrations'] },
-                { title: 'Company', links: ['About', 'Blog', 'Careers', 'Press'] },
-                { title: 'Support', links: ['Help Center', 'Contact', 'Status', 'Security'] },
-              ].map(col => (
-                <div key={col.title}>
-                  <h4 className="font-semibold text-white mb-4">{col.title}</h4>
-                  <ul className="space-y-2">
-                    {col.links.map(link => (
-                      <li key={link}>
-                        <a href="#" className="text-sm text-slate-400 hover:text-white transition-colors">{link}</a>
-                      </li>
-                    ))}
-                  </ul>
+              <div className="flex items-center gap-6 pt-4">
+                <div className="flex items-center gap-2">
+                  <Users size={18} className="text-cyan-400" />
+                  <span className="text-slate-400 text-sm">250K+ active traders</span>
                 </div>
-              ))}
+                <div className="flex items-center gap-2">
+                  <Globe size={18} className="text-purple-400" />
+                  <span className="text-slate-400 text-sm">8 global exchanges</span>
+                </div>
+              </div>
             </div>
             
-            <div className="pt-8 border-t border-slate-800/50 flex flex-col md:flex-row items-center justify-between gap-4">
-              <p className="text-sm text-slate-500">© 2025 finnysights. All rights reserved.</p>
-              <div className="flex gap-6">
-                <a href="#" className="text-sm text-slate-500 hover:text-white transition-colors">Privacy Policy</a>
-                <a href="#" className="text-sm text-slate-500 hover:text-white transition-colors">Terms of Service</a>
-                <a href="#" className="text-sm text-slate-500 hover:text-white transition-colors">Cookie Policy</a>
+            {/* Sentiment Cards Preview */}
+            <div className="relative">
+              <div className="absolute -inset-4 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 rounded-3xl blur-3xl" />
+              <div className="relative space-y-4">
+                {sentimentData.map((stock, i) => (
+                  <div key={stock.symbol} style={{ transform: `translateX(${i * 20}px)` }}>
+                    <SentimentCard {...stock} />
+                  </div>
+                ))}
               </div>
             </div>
           </div>
-        </footer>
-      </div>
+        </div>
+      </section>
+
+      {/* Features Section */}
+      <section id="features" className="relative py-24 px-4 bg-slate-900/50">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl font-black mb-4">Everything You Need to Trade Smarter</h2>
+            <p className="text-slate-400 text-lg max-w-2xl mx-auto">
+              Professional-grade tools that were once only available to hedge funds, now free for everyone.
+            </p>
+          </div>
+          
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <FeatureCard 
+              icon={BarChart3}
+              title="Real-time Sentiment"
+              description="Track market sentiment across thousands of stocks with AI-powered analysis updated every second."
+            />
+            <FeatureCard 
+              icon={Users}
+              title="Community Voting"
+              description="Join thousands of traders in voting on market direction. See what the crowd is thinking in real-time."
+            />
+            <FeatureCard 
+              icon={Bell}
+              title="Smart Alerts"
+              description="Get notified when sentiment shifts dramatically or when your watchlist stocks show unusual activity."
+            />
+            <FeatureCard 
+              icon={Globe}
+              title="Global Coverage"
+              description="Access sentiment data from 8 major exchanges worldwide including NYSE, NASDAQ, LSE, and more."
+            />
+            <FeatureCard 
+              icon={Zap}
+              title="API Access"
+              description="Build your own trading tools with our powerful API. 10,000 free calls per day included."
+            />
+            <FeatureCard 
+              icon={Shield}
+              title="Anonymous Mode"
+              description="Trade analysis without revealing your identity. Your privacy is our priority."
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Why Free Section */}
+      <section id="why-free" className="relative py-24 px-4">
+        <div className="max-w-4xl mx-auto text-center">
+          <h2 className="text-4xl font-black mb-6">Why Is It Free?</h2>
+          <p className="text-slate-300 text-lg leading-relaxed mb-8">
+            We believe market intelligence should be accessible to everyone, not just Wall Street insiders. 
+            Our freemium model is supported by optional premium features, but the core sentiment analysis 
+            and community features will always be free.
+          </p>
+          <div className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-500/20 border border-emerald-500/30 rounded-full">
+            <Check size={18} className="text-emerald-400" />
+            <span className="text-emerald-400 font-semibold">No credit card required. Free forever.</span>
+          </div>
+        </div>
+      </section>
+
+      {/* Reviews Section */}
+      <section id="reviews" className="relative py-24 px-4 bg-slate-900/50">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl font-black mb-4">Loved by Traders Worldwide</h2>
+            <div className="flex items-center justify-center gap-1 mb-2">
+              {[...Array(5)].map((_, i) => (
+                <Star key={i} size={24} className="text-yellow-400 fill-yellow-400" />
+              ))}
+            </div>
+            <p className="text-slate-400">4.9 out of 5 from 10,000+ reviews</p>
+          </div>
+          
+          <div className="grid md:grid-cols-3 gap-6">
+            {[
+              { name: 'Alex T.', role: 'Day Trader', review: 'Finally a free platform that actually works! The sentiment data has been incredibly accurate for my trades.' },
+              { name: 'Sarah M.', role: 'Swing Trader', review: 'I love the community voting feature. Its like having thousands of analysts working for you for free.' },
+              { name: 'Michael R.', role: 'Retail Investor', review: 'The API is a game-changer. Built my own trading bot using their sentiment data. Highly recommend!' },
+            ].map((review, i) => (
+              <div key={i} className="bg-slate-800/30 rounded-2xl p-6 border border-slate-700/50">
+                <div className="flex items-center gap-1 mb-4">
+                  {[...Array(5)].map((_, i) => (
+                    <Star key={i} size={16} className="text-yellow-400 fill-yellow-400" />
+                  ))}
+                </div>
+                <p className="text-slate-300 mb-4">{review.review}</p>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-full" />
+                  <div>
+                    <p className="font-semibold text-white">{review.name}</p>
+                    <p className="text-sm text-slate-400">{review.role}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA Section */}
+      <section className="relative py-24 px-4">
+        <div className="max-w-4xl mx-auto text-center">
+          <h2 className="text-4xl font-black mb-6">Ready to Trade Smarter?</h2>
+          <p className="text-slate-300 text-lg mb-8">
+            Join 250,000+ traders already using finnysights to make better trading decisions.
+          </p>
+          <button 
+            onClick={() => openAuthModal('signup')}
+            className="group px-8 py-4 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-xl text-lg font-bold hover:from-cyan-400 hover:to-purple-400 transition-all inline-flex items-center gap-2 shadow-lg shadow-cyan-500/25"
+          >
+            Get Started Free
+            <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+          </button>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="relative py-12 px-4 border-t border-slate-800">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-lg flex items-center justify-center">
+                <ThumbsUpLogo size={16} className="text-white" />
+              </div>
+              <span className="font-bold">finnysights</span>
+            </div>
+            <div className="flex items-center gap-6 text-sm text-slate-400">
+              <a href="#" className="hover:text-white transition-colors">Terms</a>
+              <a href="#" className="hover:text-white transition-colors">Privacy</a>
+              <a href="#" className="hover:text-white transition-colors">Contact</a>
+              <a href="#" className="hover:text-white transition-colors">API Docs</a>
+            </div>
+            <p className="text-sm text-slate-500">© 2024 finnysights. All rights reserved.</p>
+          </div>
+        </div>
+      </footer>
 
       {/* Auth Modal */}
       <AuthModal 
-        isOpen={authModal.isOpen} 
-        onClose={closeAuth} 
+        isOpen={authModal.open} 
+        onClose={() => setAuthModal({ ...authModal, open: false })}
         initialMode={authModal.mode}
+        onAuthSuccess={handleAuthSuccess}
       />
+
+      {/* Custom Styles */}
+      <style jsx>{`
+        @keyframes float {
+          0%, 100% { transform: translateY(0) rotate(0deg); opacity: 0.4; }
+          50% { transform: translateY(-20px) rotate(180deg); opacity: 0.8; }
+        }
+        @keyframes scroll {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        @keyframes modalIn {
+          from { opacity: 0; transform: scale(0.95) translateY(10px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        .animate-scroll {
+          animation: scroll 30s linear infinite;
+        }
+        .animate-modalIn {
+          animation: modalIn 0.3s ease-out forwards;
+        }
+        .animate-fadeIn {
+          animation: fadeIn 0.5s ease-out forwards;
+        }
+      `}</style>
     </div>
   );
 }

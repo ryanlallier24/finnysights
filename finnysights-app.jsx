@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, Search, Globe, BarChart3, MessageSquare, Users, Zap, ChevronRight, Star, Clock, Volume2, Eye, Filter, Bell, Settings, RefreshCw, Activity, Plus, X, Check, Heart, Trash2, LogOut } from 'lucide-react';
 import { auth } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { addToWatchlist, removeFromWatchlist, getWatchlist, recordVote, getUserProfile } from './firestore.js';
+import { addToWatchlist, removeFromWatchlist, getWatchlist, recordVote, removeVote, getUserVotes, getUserProfile } from './firestore.js';
 
 // Thumbs Up Logo Component
 const ThumbsUpLogo = ({ size = 22, className = "" }) => (
@@ -141,48 +141,61 @@ const SentimentMeter = ({ score, size = 'md' }) => {
   );
 };
 
-// Stock card component with watchlist functionality
-const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchlist, onVote, currentUser }) => {
+// Stock card component with persistent voting
+const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchlist, userVote, onVote, currentUser }) => {
   const [localVotes, setLocalVotes] = useState({ up: stock.thumbsUp, down: stock.thumbsDown });
-  const [userVote, setUserVote] = useState(null);
+  const [isVoting, setIsVoting] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+
+  // Initialize local votes based on user's previous vote
+  useEffect(() => {
+    setLocalVotes({ up: stock.thumbsUp, down: stock.thumbsDown });
+  }, [stock]);
 
   const handleVote = async (type, e) => {
     e.stopPropagation();
     
     if (!currentUser) {
-      alert('Please log in to vote');
+      alert('Please sign in to vote!');
       return;
     }
 
-    if (userVote === type) {
-      setUserVote(null);
+    if (isVoting) return;
+    setIsVoting(true);
+
+    const voteValue = type === 'up' ? 'bullish' : 'bearish';
+    const currentVote = userVote;
+
+    // Optimistic UI update
+    if (currentVote === voteValue) {
+      // Remove vote
       setLocalVotes(prev => ({
-        ...prev,
-        [type === 'up' ? 'up' : 'down']: prev[type === 'up' ? 'up' : 'down'] - 1
+        up: type === 'up' ? prev.up - 1 : prev.up,
+        down: type === 'down' ? prev.down - 1 : prev.down
       }));
+      await onVote(stock.ticker, null);
     } else {
-      if (userVote) {
-        setLocalVotes(prev => ({
-          ...prev,
-          [userVote === 'up' ? 'up' : 'down']: prev[userVote === 'up' ? 'up' : 'down'] - 1
-        }));
-      }
-      setUserVote(type);
-      setLocalVotes(prev => ({
-        ...prev,
-        [type === 'up' ? 'up' : 'down']: prev[type === 'up' ? 'up' : 'down'] + 1
-      }));
-      
-      // Save vote to Firestore
-      await recordVote(currentUser.uid, stock.ticker, type === 'up' ? 'bullish' : 'bearish');
+      // Add or change vote
+      setLocalVotes(prev => {
+        const newVotes = { ...prev };
+        // Remove previous vote
+        if (currentVote === 'bullish') newVotes.up -= 1;
+        if (currentVote === 'bearish') newVotes.down -= 1;
+        // Add new vote
+        if (type === 'up') newVotes.up += 1;
+        if (type === 'down') newVotes.down += 1;
+        return newVotes;
+      });
+      await onVote(stock.ticker, voteValue);
     }
+
+    setIsVoting(false);
   };
 
   const handleWatchlistToggle = async (e) => {
     e.stopPropagation();
     if (!currentUser) {
-      alert('Please log in to use watchlist');
+      alert('Please sign in to use watchlist!');
       return;
     }
     setIsAdding(true);
@@ -254,24 +267,26 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
         <div className="flex items-center gap-2">
           <button 
             onClick={(e) => handleVote('up', e)}
+            disabled={isVoting}
             className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
-              userVote === 'up' 
-                ? 'bg-emerald-500 text-white' 
+              userVote === 'bullish'
+                ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30' 
                 : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
-            }`}
+            } ${isVoting ? 'opacity-50' : ''}`}
           >
-            <ThumbsUp size={12} className={userVote === 'up' ? 'fill-white' : ''} />
+            <ThumbsUp size={12} className={userVote === 'bullish' ? 'fill-white' : ''} />
             <span className="text-xs font-bold">{localVotes.up.toLocaleString()}</span>
           </button>
           <button 
             onClick={(e) => handleVote('down', e)}
+            disabled={isVoting}
             className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
-              userVote === 'down' 
-                ? 'bg-rose-500 text-white' 
+              userVote === 'bearish'
+                ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30' 
                 : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'
-            }`}
+            } ${isVoting ? 'opacity-50' : ''}`}
           >
-            <ThumbsDown size={12} className={userVote === 'down' ? 'fill-white' : ''} />
+            <ThumbsDown size={12} className={userVote === 'bearish' ? 'fill-white' : ''} />
             <span className="text-xs font-bold">{localVotes.down.toLocaleString()}</span>
           </button>
         </div>
@@ -284,13 +299,22 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
           />
         </div>
         <p className="text-[10px] text-slate-500 mt-1 text-center">{bullishPercent}% Bullish</p>
+        
+        {/* User voted indicator */}
+        {userVote && (
+          <div className={`absolute top-2 right-12 px-1.5 py-0.5 rounded text-[9px] font-bold ${
+            userVote === 'bullish' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+          }`}>
+            You: {userVote === 'bullish' ? '👍' : '👎'}
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
 // Stock detail panel
-const StockDetailPanel = ({ stock, onClose }) => {
+const StockDetailPanel = ({ stock, onClose, userVote }) => {
   if (!stock) return null;
   
   return (
@@ -308,6 +332,13 @@ const StockDetailPanel = ({ stock, onClose }) => {
             <div className="flex items-center gap-2 mt-1">
               <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-[10px] font-bold rounded">{stock.exchange}</span>
               <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-[10px] font-bold rounded">{stock.sector}</span>
+              {userVote && (
+                <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${
+                  userVote === 'bullish' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                }`}>
+                  Your vote: {userVote === 'bullish' ? '👍 Bullish' : '👎 Bearish'}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -435,6 +466,7 @@ export default function Finnysights() {
   const [time, setTime] = useState(new Date());
   const [currentUser, setCurrentUser] = useState(null);
   const [watchlist, setWatchlist] = useState([]);
+  const [userVotes, setUserVotes] = useState({});
   const [isLoadingWatchlist, setIsLoadingWatchlist] = useState(false);
 
   // Auth state listener
@@ -442,13 +474,19 @@ export default function Finnysights() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
-        // Load watchlist from Firestore
+        // Load watchlist and votes from Firestore
         setIsLoadingWatchlist(true);
         const userWatchlist = await getWatchlist(user.uid);
         setWatchlist(userWatchlist || []);
+        
+        // Load user's votes
+        const votes = await getUserVotes(user.uid);
+        setUserVotes(votes || {});
+        
         setIsLoadingWatchlist(false);
       } else {
         setWatchlist([]);
+        setUserVotes({});
       }
     });
     return () => unsubscribe();
@@ -473,13 +511,11 @@ export default function Finnysights() {
     const isInWatchlist = watchlist.some(s => s.symbol === stock.ticker);
     
     if (isInWatchlist) {
-      // Remove from watchlist
       const success = await removeFromWatchlist(currentUser.uid, stock.ticker);
       if (success) {
         setWatchlist(prev => prev.filter(s => s.symbol !== stock.ticker));
       }
     } else {
-      // Add to watchlist
       const success = await addToWatchlist(currentUser.uid, { symbol: stock.ticker, name: stock.name });
       if (success) {
         setWatchlist(prev => [...prev, { symbol: stock.ticker, name: stock.name, addedAt: new Date().toISOString() }]);
@@ -487,9 +523,33 @@ export default function Finnysights() {
     }
   };
 
+  const handleVote = async (ticker, vote) => {
+    if (!currentUser) return;
+    
+    if (vote === null) {
+      // Remove vote
+      await removeVote(currentUser.uid, ticker);
+      setUserVotes(prev => {
+        const updated = { ...prev };
+        delete updated[ticker];
+        return updated;
+      });
+    } else {
+      // Record vote
+      await recordVote(currentUser.uid, ticker, vote);
+      setUserVotes(prev => ({
+        ...prev,
+        [ticker]: { vote, votedAt: new Date().toISOString() }
+      }));
+    }
+  };
+
+  const getUserVoteForStock = (ticker) => {
+    return userVotes[ticker]?.vote || null;
+  };
+
   const isStockInWatchlist = (ticker) => watchlist.some(s => s.symbol === ticker);
 
-  // Get watchlist stocks with full data
   const watchlistStocks = STOCKS.filter(s => isStockInWatchlist(s.ticker));
 
   const filteredStocks = STOCKS.filter(s => 
@@ -651,7 +711,7 @@ export default function Finnysights() {
               <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
                 <Star size={32} className="mx-auto text-slate-600 mb-3" />
                 <h3 className="text-lg font-bold text-white mb-2">Sign in to use Watchlist</h3>
-                <p className="text-slate-400 text-sm mb-4">Create an account to save your favorite stocks</p>
+                <p className="text-slate-400 text-sm mb-4">Create an account to save your favorite stocks and track your votes</p>
                 <a 
                   href="/"
                   className="inline-block px-6 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg font-bold text-sm hover:from-cyan-400 hover:to-purple-400 transition-all"
@@ -695,6 +755,8 @@ export default function Finnysights() {
                       isSelected={selectedStock?.ticker === stock.ticker}
                       isInWatchlist={isStockInWatchlist(stock.ticker)}
                       onToggleWatchlist={handleToggleWatchlist}
+                      userVote={getUserVoteForStock(stock.ticker)}
+                      onVote={handleVote}
                       currentUser={currentUser}
                     />
                   </div>
@@ -714,7 +776,11 @@ export default function Finnysights() {
           {/* Right column - Details & Social */}
           <div className="space-y-4">
             {selectedStock ? (
-              <StockDetailPanel stock={selectedStock} onClose={() => setSelectedStock(null)} />
+              <StockDetailPanel 
+                stock={selectedStock} 
+                onClose={() => setSelectedStock(null)} 
+                userVote={getUserVoteForStock(selectedStock.ticker)}
+              />
             ) : (
               <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center">
                 <BarChart3 size={32} className="mx-auto text-slate-600 mb-3" />

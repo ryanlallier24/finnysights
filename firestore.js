@@ -224,19 +224,25 @@ export const recordVote = async (uid, symbol, vote, currentPrice = null) => {
     const userProfile = await getUserProfile(uid);
     const currentVotes = userProfile?.votes || {};
     const previousVote = currentVotes[symbol];
+    const currentTotalVotes = userProfile?.totalVotes || 0;
     
     // Update user's vote record with price for prediction tracking
     const voteData = {
       vote: vote,
       votedAt: new Date().toISOString(),
-      priceAtVote: currentPrice, // Store price when vote was made
-      resolved: false, // Will be true once prediction is checked
-      correct: null, // Will be true/false once resolved
+      priceAtVote: currentPrice,
+      resolved: false,
+      correct: null,
     };
+    
+    // Only increment total if voting on a NEW stock (not changing existing vote)
+    const isNewVote = !previousVote;
+    const newTotalVotes = isNewVote ? currentTotalVotes + 1 : currentTotalVotes;
     
     await updateDoc(userRef, {
       [`votes.${symbol}`]: voteData,
-      totalVotes: increment(previousVote ? 0 : 1),
+      totalVotes: newTotalVotes,
+      reputationScore: newTotalVotes, // Base reputation until accuracy kicks in
     });
     
     // Update community vote totals
@@ -269,7 +275,7 @@ export const recordVote = async (uid, symbol, vote, currentPrice = null) => {
       await updateDoc(stockVotesRef, updates);
     }
     
-    console.log(`Recorded ${vote} vote for ${symbol} at price ${currentPrice}`);
+    console.log(`Recorded ${vote} vote for ${symbol}. Total votes now: ${newTotalVotes}`);
     return true;
   } catch (error) {
     console.error('Error recording vote:', error);
@@ -563,11 +569,11 @@ export const getStockComments = async (symbol, limitCount = 20) => {
   
   try {
     const commentsRef = collection(db, 'stockComments');
+    // Simple query without orderBy to avoid needing Firestore index
     const q = query(
       commentsRef, 
-      where('symbol', '==', symbol), 
-      orderBy('createdAt', 'desc'),
-      limit(limitCount)
+      where('symbol', '==', symbol),
+      limit(50)
     );
     const snapshot = await getDocs(q);
     
@@ -581,7 +587,10 @@ export const getStockComments = async (symbol, limitCount = 20) => {
       });
     });
     
-    return comments;
+    // Sort by createdAt in JavaScript instead
+    comments.sort((a, b) => b.createdAt - a.createdAt);
+    
+    return comments.slice(0, limitCount);
   } catch (error) {
     console.error('Error getting comments:', error);
     return [];
@@ -776,4 +785,99 @@ export const removePriceAlert = async (uid, alertId) => {
     console.error('Error removing alert:', error);
     return false;
   }
+};
+
+// ============================================
+// PORTFOLIO FUNCTIONS
+// ============================================
+
+// Add a holding to portfolio
+export const addHolding = async (uid, holding) => {
+  if (!uid || !holding) return false;
+  
+  try {
+    const userRef = doc(db, 'users', uid);
+    const holdingData = {
+      id: Date.now().toString(),
+      symbol: holding.symbol.toUpperCase(),
+      name: holding.name || holding.symbol,
+      quantity: parseFloat(holding.quantity),
+      purchasePrice: parseFloat(holding.purchasePrice),
+      purchaseDate: holding.purchaseDate || new Date().toISOString(),
+      isCrypto: holding.isCrypto || false,
+      notes: holding.notes || '',
+      createdAt: new Date().toISOString(),
+    };
+    
+    await updateDoc(userRef, {
+      portfolio: arrayUnion(holdingData)
+    });
+    console.log(`Added ${holding.symbol} to portfolio`);
+    return holdingData;
+  } catch (error) {
+    console.error('Error adding holding:', error);
+    return false;
+  }
+};
+
+// Update a holding in portfolio
+export const updateHolding = async (uid, holdingId, updates) => {
+  if (!uid || !holdingId) return false;
+  
+  try {
+    const userProfile = await getUserProfile(uid);
+    if (!userProfile?.portfolio) return false;
+    
+    const holdingIndex = userProfile.portfolio.findIndex(h => h.id === holdingId);
+    if (holdingIndex === -1) return false;
+    
+    const oldHolding = userProfile.portfolio[holdingIndex];
+    const updatedHolding = { ...oldHolding, ...updates, updatedAt: new Date().toISOString() };
+    
+    // Remove old and add updated
+    const userRef = doc(db, 'users', uid);
+    await updateDoc(userRef, {
+      portfolio: arrayRemove(oldHolding)
+    });
+    await updateDoc(userRef, {
+      portfolio: arrayUnion(updatedHolding)
+    });
+    
+    console.log(`Updated holding ${holdingId}`);
+    return true;
+  } catch (error) {
+    console.error('Error updating holding:', error);
+    return false;
+  }
+};
+
+// Remove a holding from portfolio
+export const removeHolding = async (uid, holdingId) => {
+  if (!uid || !holdingId) return false;
+  
+  try {
+    const userProfile = await getUserProfile(uid);
+    if (!userProfile?.portfolio) return false;
+    
+    const holdingToRemove = userProfile.portfolio.find(h => h.id === holdingId);
+    if (!holdingToRemove) return false;
+    
+    const userRef = doc(db, 'users', uid);
+    await updateDoc(userRef, {
+      portfolio: arrayRemove(holdingToRemove)
+    });
+    console.log(`Removed holding ${holdingId}`);
+    return true;
+  } catch (error) {
+    console.error('Error removing holding:', error);
+    return false;
+  }
+};
+
+// Get user's portfolio
+export const getPortfolio = async (uid) => {
+  if (!uid) return [];
+  
+  const userProfile = await getUserProfile(uid);
+  return userProfile?.portfolio || [];
 };

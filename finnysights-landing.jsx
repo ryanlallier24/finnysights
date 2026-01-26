@@ -740,11 +740,329 @@ const FeatureCard = ({ icon: Icon, title, description }) => (
   </div>
 );
 
+// Demo Video Modal Component
+const DemoVideoModal = ({ isOpen, onClose }) => {
+  const [currentScene, setCurrentScene] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [hasStarted, setHasStarted] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(50);
+  const audioRef = React.useRef(null);
+
+  const scenes = 9;
+  const sceneDurations = [4500, 5500, 4500, 5500, 5000, 5000, 4500, 4500, 5000];
+
+  useEffect(() => {
+    if (!isOpen) {
+      setCurrentScene(0);
+      setIsPlaying(false);
+      setHasStarted(false);
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isPlaying || currentScene >= scenes) return;
+    
+    const timer = setTimeout(() => {
+      if (currentScene < scenes - 1) {
+        setCurrentScene(prev => prev + 1);
+      } else {
+        setIsPlaying(false);
+        // Fade out music
+        if (audioRef.current) {
+          const fadeOut = setInterval(() => {
+            if (audioRef.current && audioRef.current.volume > 0.05) {
+              audioRef.current.volume -= 0.05;
+            } else {
+              if (audioRef.current) {
+                audioRef.current.pause();
+                audioRef.current.volume = volume / 100;
+              }
+              clearInterval(fadeOut);
+            }
+          }, 100);
+        }
+      }
+    }, sceneDurations[currentScene]);
+
+    return () => clearTimeout(timer);
+  }, [isPlaying, currentScene, scenes, volume]);
+
+  const startDemo = () => {
+    setHasStarted(true);
+    setIsPlaying(true);
+    setCurrentScene(0);
+    if (audioRef.current) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.volume = volume / 100;
+      audioRef.current.play().catch(e => console.log('Audio blocked:', e));
+    }
+  };
+
+  const restartDemo = () => {
+    setCurrentScene(0);
+    setIsPlaying(true);
+    if (audioRef.current) {
+      audioRef.current.volume = volume / 100;
+      audioRef.current.currentTime = 0;
+      audioRef.current.play();
+    }
+  };
+
+  const toggleMute = () => {
+    setIsMuted(!isMuted);
+    if (audioRef.current) audioRef.current.muted = !isMuted;
+  };
+
+  const handleVolumeChange = (e) => {
+    const val = parseInt(e.target.value);
+    setVolume(val);
+    if (audioRef.current) audioRef.current.volume = val / 100;
+  };
+
+  if (!isOpen) return null;
+
+  const progressPercent = hasStarted ? ((currentScene + 1) / scenes) * 100 : 0;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/90 backdrop-blur-sm" onClick={onClose} />
+      
+      {/* Audio */}
+      <audio ref={audioRef} loop preload="auto">
+        <source src="https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0a13f69d2.mp3" type="audio/mpeg" />
+      </audio>
+      
+      {/* Modal */}
+      <div className="relative w-full h-full max-w-7xl max-h-[95vh] m-2 bg-slate-950 rounded-2xl overflow-hidden shadow-2xl border border-slate-800">
+        {/* Close Button */}
+        <button onClick={onClose} className="absolute top-4 right-4 z-50 w-12 h-12 bg-slate-800/80 hover:bg-slate-700 rounded-full flex items-center justify-center text-white text-xl transition-all">✕</button>
+        
+        {/* Music Controls */}
+        {hasStarted && (
+          <div className="absolute top-4 left-4 z-50 flex items-center gap-3 px-4 py-3 bg-slate-800/80 rounded-xl">
+            <div className="flex items-end gap-1 h-6">
+              {[0, 0.1, 0.2, 0.15, 0.05].map((delay, i) => (
+                <span key={i} className="w-1 bg-gradient-to-t from-cyan-400 to-purple-500 rounded-full" style={{ 
+                  height: isMuted ? '6px' : '100%',
+                  animation: isMuted ? 'none' : `visualizer 0.4s ease-in-out ${delay}s infinite alternate`
+                }} />
+              ))}
+            </div>
+            <button onClick={toggleMute} className="w-9 h-9 bg-gradient-to-br from-cyan-500 to-purple-500 rounded-full flex items-center justify-center">
+              {isMuted ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              )}
+            </button>
+            <input type="range" min="0" max="100" value={volume} onChange={handleVolumeChange} className="w-20 h-1 bg-slate-600 rounded-full appearance-none cursor-pointer" />
+          </div>
+        )}
+
+        {/* Progress Bar */}
+        <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-slate-800 z-50">
+          <div className="h-full bg-gradient-to-r from-cyan-500 to-purple-500 transition-all duration-500" style={{ width: `${progressPercent}%` }} />
+        </div>
+
+        {/* Background */}
+        <div className="absolute inset-0">
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950" />
+          <div className="absolute top-1/4 -left-32 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl" />
+          <div className="absolute bottom-1/4 -right-32 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl" />
+        </div>
+
+        {/* Content */}
+        <div className="relative z-10 w-full h-full flex items-center justify-center">
+          {!hasStarted ? (
+            /* Start Screen */
+            <div className="flex flex-col items-center justify-center text-center px-8">
+              <div className="w-24 h-24 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-3xl flex items-center justify-center mb-6 shadow-2xl shadow-cyan-500/30">
+                <ThumbsUpLogo size={55} className="text-white" />
+              </div>
+              <h2 className="text-5xl font-black mb-3"><span className="text-cyan-400">finny</span><span className="text-white">sights</span></h2>
+              <p className="text-xl text-slate-400 mb-8">Product Demo</p>
+              <button onClick={startDemo} className="px-10 py-4 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-xl text-xl font-bold hover:from-cyan-400 hover:to-purple-400 transition-all flex items-center gap-3 shadow-xl">
+                <span className="text-2xl">▶</span> Play Demo
+              </button>
+              <p className="mt-6 text-slate-500 text-sm flex items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                ~45 seconds with music
+              </p>
+            </div>
+          ) : (
+            /* Scenes */
+            <div className="w-full h-full">
+              {/* Scene 1: Intro */}
+              {currentScene === 0 && (
+                <div className="flex flex-col items-center justify-center h-full animate-fadeIn">
+                  <div className="w-28 h-28 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-cyan-500/30 mb-8 animate-scaleIn">
+                    <ThumbsUpLogo size={65} className="text-white" />
+                  </div>
+                  <h1 className="text-7xl font-black mb-4 animate-fadeInUp"><span className="text-cyan-400">finny</span><span className="text-white">sights</span></h1>
+                  <p className="text-2xl text-slate-400 animate-fadeInUp animation-delay-500">Where traders vote on the market</p>
+                </div>
+              )}
+
+              {/* Scene 2: Problem */}
+              {currentScene === 1 && (
+                <div className="flex flex-col items-center justify-center h-full px-12 animate-fadeIn">
+                  <h2 className="text-5xl font-bold text-white mb-12 animate-fadeInUp">The Problem</h2>
+                  <div className="space-y-5 w-full max-w-2xl">
+                    <div className="flex items-center gap-6 p-6 bg-slate-800/50 rounded-2xl border border-rose-500/30 animate-fadeInLeft"><span className="text-4xl">📊</span><span className="text-xl text-slate-300">Too many opinions, no clear signal</span></div>
+                    <div className="flex items-center gap-6 p-6 bg-slate-800/50 rounded-2xl border border-rose-500/30 animate-fadeInLeft animation-delay-300"><span className="text-4xl">🤯</span><span className="text-xl text-slate-300">Information overload everywhere</span></div>
+                    <div className="flex items-center gap-6 p-6 bg-slate-800/50 rounded-2xl border border-rose-500/30 animate-fadeInLeft animation-delay-600"><span className="text-4xl">❓</span><span className="text-xl text-slate-300">What does the crowd really think?</span></div>
+                  </div>
+                </div>
+              )}
+
+              {/* Scene 3: Solution */}
+              {currentScene === 2 && (
+                <div className="flex flex-col items-center justify-center h-full px-12 animate-fadeIn">
+                  <h2 className="text-5xl font-bold text-white mb-6 animate-scaleIn">The Solution</h2>
+                  <div className="flex items-center gap-5 mb-10 animate-fadeInUp animation-delay-300">
+                    <div className="w-16 h-16 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-xl flex items-center justify-center"><ThumbsUpLogo size={38} className="text-white" /></div>
+                    <span className="text-4xl font-black"><span className="text-cyan-400">finny</span><span className="text-white">sights</span></span>
+                  </div>
+                  <p className="text-2xl text-center text-slate-300 max-w-3xl leading-relaxed animate-fadeInUp animation-delay-600">
+                    Real-time <span className="text-cyan-400 font-bold">community sentiment</span> for stocks & crypto.<br/>
+                    See what traders think <span className="text-emerald-400 font-bold">before</span> you trade.
+                  </p>
+                </div>
+              )}
+
+              {/* Scene 4: Voting Demo */}
+              {currentScene === 3 && (
+                <div className="flex flex-col items-center justify-center h-full px-12 animate-fadeIn">
+                  <h2 className="text-4xl font-bold text-white mb-10 animate-fadeInUp">Simple Voting System</h2>
+                  <div className="bg-slate-800/50 rounded-2xl p-8 border border-slate-700 w-full max-w-lg animate-scaleIn animation-delay-300">
+                    <div className="flex items-center gap-5 mb-6">
+                      <div className="w-16 h-16 bg-emerald-500/20 rounded-xl flex items-center justify-center text-3xl font-bold text-emerald-400">AA</div>
+                      <div><h3 className="text-2xl font-bold text-white">AAPL</h3><p className="text-slate-400">Apple Inc.</p></div>
+                      <div className="ml-auto text-right"><p className="text-3xl font-bold font-mono text-white">$248.04</p><p className="text-emerald-400 font-mono">+0.12%</p></div>
+                    </div>
+                    <div className="flex gap-3 mb-4">
+                      <div className="flex-1 py-4 rounded-xl flex items-center justify-center gap-3 text-xl font-bold bg-emerald-500 text-white"><span>👍</span><span>8,935</span></div>
+                      <div className="flex-1 py-4 rounded-xl flex items-center justify-center gap-3 text-xl font-bold bg-rose-500/20 text-rose-400"><span>👎</span><span>1,243</span></div>
+                    </div>
+                    <div className="h-3 bg-slate-700 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400" style={{width:'88%'}}/></div>
+                    <p className="text-center text-slate-400 mt-2">88% Bullish</p>
+                  </div>
+                  <div className="mt-6 flex items-center gap-3 animate-bounce"><span className="text-4xl">👆</span><span className="text-xl text-cyan-400 font-bold">Vote recorded!</span></div>
+                </div>
+              )}
+
+              {/* Scene 5: Features */}
+              {currentScene === 4 && (
+                <div className="flex flex-col items-center justify-center h-full px-12 animate-fadeIn">
+                  <h2 className="text-4xl font-bold text-white mb-10 animate-fadeInUp">Packed with Features</h2>
+                  <div className="grid grid-cols-3 gap-5 w-full max-w-4xl">
+                    {[{icon:'📈',title:'Live Stock Prices',desc:'Real-time data'},{icon:'🪙',title:'Crypto Markets',desc:'BTC, ETH, SOL & more'},{icon:'⭐',title:'Watchlist',desc:'Track favorites'},{icon:'💬',title:'Comments',desc:'Discuss with traders'},{icon:'🏆',title:'Leaderboard',desc:'Follow top performers'},{icon:'🔔',title:'Price Alerts',desc:'Never miss a move'}].map((f,i) => (
+                      <div key={i} className="p-6 bg-slate-800/50 rounded-xl border border-slate-700/50 animate-fadeInUp" style={{animationDelay:`${i*150}ms`}}>
+                        <span className="text-4xl mb-3 block">{f.icon}</span>
+                        <h3 className="text-lg font-bold text-white mb-1">{f.title}</h3>
+                        <p className="text-sm text-slate-400">{f.desc}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Scene 6: Portfolio */}
+              {currentScene === 5 && (
+                <div className="flex flex-col items-center justify-center h-full px-12 animate-fadeIn">
+                  <h2 className="text-4xl font-bold text-white mb-10 animate-fadeInUp">Track Your Portfolio</h2>
+                  <div className="bg-slate-800/50 rounded-2xl p-8 border border-slate-700 w-full max-w-xl animate-scaleIn animation-delay-300">
+                    <div className="grid grid-cols-2 gap-4 mb-6">
+                      <div className="p-5 bg-slate-900/50 rounded-xl"><p className="text-sm text-slate-500 mb-1">Total Value</p><p className="text-3xl font-bold font-mono text-white">$47,832</p></div>
+                      <div className="p-5 bg-emerald-500/10 rounded-xl border border-emerald-500/30"><p className="text-sm text-slate-500 mb-1">Total P/L</p><p className="text-3xl font-bold font-mono text-emerald-400">+$8,234</p></div>
+                    </div>
+                    <div className="space-y-3">
+                      {[{s:'AAPL',n:25,v:'$6,201',p:'+12.3%',c:'cyan'},{s:'NVDA',n:10,v:'$1,876',p:'+45.2%',c:'cyan'},{s:'BTC',n:0.5,v:'$52,261',p:'+8.1%',c:'orange'}].map((h,i) => (
+                        <div key={i} className="flex items-center justify-between p-3 bg-slate-900/30 rounded-lg animate-fadeInLeft" style={{animationDelay:`${(i+2)*200}ms`}}>
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 bg-${h.c}-500/20 rounded-lg flex items-center justify-center text-${h.c}-400 font-bold`}>{h.s.substring(0,2)}</div>
+                            <div><p className="font-bold text-white">{h.s}</p><p className="text-xs text-slate-500">{h.n} {h.s==='BTC'?'coins':'shares'}</p></div>
+                          </div>
+                          <div className="text-right"><p className="font-mono text-white">{h.v}</p><p className="text-sm font-mono text-emerald-400">{h.p}</p></div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Scene 7: Leaderboard */}
+              {currentScene === 6 && (
+                <div className="flex flex-col items-center justify-center h-full px-12 animate-fadeIn">
+                  <h2 className="text-4xl font-bold text-white mb-10 animate-fadeInUp">🏆 Follow Top Traders</h2>
+                  <div className="w-full max-w-lg space-y-4">
+                    {[{r:'🥇',a:'🦁',n:'CryptoKing',acc:87,rep:2847,bc:'amber-500'},{r:'🥈',a:'🦊',n:'StockMaster',acc:82,rep:2134,bc:'slate-400'},{r:'🥉',a:'🐺',n:'TradingPro',acc:79,rep:1876,bc:'amber-700'}].map((t,i) => (
+                      <div key={i} className="flex items-center gap-5 p-5 bg-slate-800/50 rounded-xl border border-slate-700/50 animate-fadeInLeft" style={{animationDelay:`${(i+1)*300}ms`}}>
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl bg-${t.bc}`}>{t.r}</div>
+                        <span className="text-3xl">{t.a}</span>
+                        <div className="flex-1"><p className="text-xl font-bold text-white">{t.n}</p><span className="text-emerald-400 text-sm">🎯 {t.acc}% accuracy</span></div>
+                        <div className="text-right"><p className="text-2xl font-bold text-cyan-400">{t.rep.toLocaleString()}</p><p className="text-xs text-slate-500">REP</p></div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Scene 8: Stats */}
+              {currentScene === 7 && (
+                <div className="flex flex-col items-center justify-center h-full animate-fadeIn">
+                  <h2 className="text-4xl font-bold text-white mb-16 animate-fadeInUp">Join the Community</h2>
+                  <div className="flex gap-16">
+                    {[{v:'50K+',l:'Active Traders'},{v:'1M+',l:'Votes Cast'},{v:'500+',l:'Assets Tracked'}].map((s,i) => (
+                      <div key={i} className="text-center animate-scaleIn" style={{animationDelay:`${(i+1)*300}ms`}}>
+                        <p className="text-6xl font-black bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent mb-3">{s.v}</p>
+                        <p className="text-xl text-slate-400">{s.l}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Scene 9: CTA */}
+              {currentScene === 8 && (
+                <div className="flex flex-col items-center justify-center h-full animate-fadeIn">
+                  <div className="flex items-center gap-5 mb-8 animate-scaleIn">
+                    <div className="w-20 h-20 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-2xl flex items-center justify-center shadow-2xl shadow-cyan-500/30"><ThumbsUpLogo size={48} className="text-white" /></div>
+                    <span className="text-5xl font-black"><span className="text-cyan-400">finny</span><span className="text-white">sights</span></span>
+                  </div>
+                  <h2 className="text-5xl font-bold text-white mb-5 animate-fadeInUp animation-delay-300">Start Trading Smarter</h2>
+                  <p className="text-xl text-slate-400 mb-10 animate-fadeInUp animation-delay-500">100% Free. No credit card required.</p>
+                  <div className="px-12 py-5 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-xl text-2xl font-bold text-white shadow-2xl shadow-cyan-500/30 animate-pulse animate-scaleIn animation-delay-700">
+                    Join Now → finnysights.com
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Replay Button */}
+        {hasStarted && !isPlaying && currentScene === scenes - 1 && (
+          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50">
+            <button onClick={restartDemo} className="px-6 py-3 bg-slate-800 hover:bg-slate-700 rounded-lg font-bold transition-all flex items-center gap-2">↻ Replay</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // Main Landing Page Component
 export default function FinnysightsLanding() {
   const [authModal, setAuthModal] = useState({ open: false, mode: 'login' });
   const [currentUser, setCurrentUser] = useState(null);
-
+  const [showDemo, setShowDemo] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
 
   // Listen for auth state changes
@@ -889,7 +1207,10 @@ export default function FinnysightsLanding() {
                   Free Always
                   <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
                 </button>
-                <button className="group px-8 py-4 bg-slate-800/50 border border-slate-700 rounded-xl text-lg font-semibold hover:bg-slate-800 hover:border-slate-600 transition-all flex items-center justify-center gap-2">
+                <button 
+                  onClick={() => setShowDemo(true)}
+                  className="group px-8 py-4 bg-slate-800/50 border border-slate-700 rounded-xl text-lg font-semibold hover:bg-slate-800 hover:border-slate-600 transition-all flex items-center justify-center gap-2"
+                >
                   <Play size={20} className="text-cyan-400" />
                   Watch Demo
                 </button>
@@ -1068,6 +1389,9 @@ export default function FinnysightsLanding() {
         onAuthSuccess={handleAuthSuccess}
       />
 
+      {/* Demo Video Modal */}
+      <DemoVideoModal isOpen={showDemo} onClose={() => setShowDemo(false)} />
+
       {/* Custom Styles */}
       <style jsx>{`
         @keyframes float {
@@ -1095,6 +1419,35 @@ export default function FinnysightsLanding() {
         .animate-fadeIn {
           animation: fadeIn 0.5s ease-out forwards;
         }
+        @keyframes scaleIn {
+          from { opacity: 0; transform: scale(0.5); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        .animate-scaleIn {
+          animation: scaleIn 0.6s ease-out forwards;
+        }
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fadeInUp {
+          animation: fadeInUp 0.6s ease-out forwards;
+        }
+        @keyframes fadeInLeft {
+          from { opacity: 0; transform: translateX(-20px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        .animate-fadeInLeft {
+          animation: fadeInLeft 0.6s ease-out forwards;
+        }
+        @keyframes visualizer {
+          from { height: 6px; }
+          to { height: 24px; }
+        }
+        .animation-delay-300 { animation-delay: 300ms; }
+        .animation-delay-500 { animation-delay: 500ms; }
+        .animation-delay-600 { animation-delay: 600ms; }
+        .animation-delay-700 { animation-delay: 700ms; }
       `}</style>
     </div>
   );

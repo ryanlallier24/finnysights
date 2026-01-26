@@ -104,31 +104,114 @@ const AnimatedBackground = () => {
   );
 };
 
-// Live ticker simulation
+// Finnhub API for live prices
+const FINNHUB_API_KEY = 'd5r20chr01qqqlh9ass0d5r20chr01qqqlh9assg';
+
+// Live ticker with real prices
 const LiveTicker = () => {
-  const tickers = [
-    { symbol: 'AAPL', price: 178.42, change: 2.34 },
-    { symbol: 'NVDA', price: 487.23, change: 12.45 },
-    { symbol: 'TSLA', price: 245.67, change: -3.12 },
-    { symbol: 'MSFT', price: 378.92, change: 1.23 },
-    { symbol: 'AMZN', price: 145.78, change: -0.89 },
-    { symbol: 'GOOGL', price: 141.23, change: 0.67 },
-    { symbol: 'META', price: 367.89, change: 4.21 },
-    { symbol: 'JPM', price: 167.34, change: 0.45 },
-  ];
+  const [tickers, setTickers] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
+
+  useEffect(() => {
+    const fetchPrices = async () => {
+      try {
+        // Fetch stock prices from Finnhub
+        const stockSymbols = ['AAPL', 'NVDA', 'TSLA', 'MSFT', 'AMZN', 'GOOGL', 'META', 'JPM'];
+        const stockPromises = stockSymbols.map(symbol =>
+          fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`)
+            .then(res => res.json())
+            .then(data => ({
+              symbol,
+              price: data.c || 0,
+              change: data.dp || 0,
+              type: 'stock'
+            }))
+            .catch(() => ({ symbol, price: 0, change: 0, type: 'stock' }))
+        );
+        
+        // Fetch crypto prices from CoinGecko (free, no API key needed)
+        const cryptoPromise = fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd&include_24hr_change=true')
+          .then(res => res.json())
+          .then(data => [
+            { symbol: 'BTC', price: data.bitcoin?.usd || 0, change: data.bitcoin?.usd_24h_change || 0, type: 'crypto' },
+            { symbol: 'ETH', price: data.ethereum?.usd || 0, change: data.ethereum?.usd_24h_change || 0, type: 'crypto' },
+            { symbol: 'SOL', price: data.solana?.usd || 0, change: data.solana?.usd_24h_change || 0, type: 'crypto' },
+          ])
+          .catch(() => []);
+        
+        const [stockResults, cryptoResults] = await Promise.all([
+          Promise.all(stockPromises),
+          cryptoPromise
+        ]);
+        
+        const allTickers = [...stockResults.filter(t => t.price > 0), ...cryptoResults.filter(t => t.price > 0)];
+        
+        if (allTickers.length > 0) {
+          setTickers(allTickers);
+          setLastUpdated(new Date());
+        }
+        setIsLoading(false);
+      } catch (error) {
+        console.error('Error fetching prices:', error);
+        setIsLoading(false);
+      }
+    };
+
+    fetchPrices();
+    const interval = setInterval(fetchPrices, 60000); // Update every minute
+    return () => clearInterval(interval);
+  }, []);
+
+  const formatPrice = (price, type) => {
+    if (type === 'crypto' && price >= 1000) {
+      return price.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    }
+    return price.toFixed(2);
+  };
+
+  if (isLoading || tickers.length === 0) {
+    // Show placeholder while loading
+    return (
+      <div className="w-full bg-slate-900/50 border-y border-slate-800 overflow-hidden">
+        <div className="flex items-center">
+          <div className="flex items-center gap-2 px-4 py-3 bg-slate-800/50 border-r border-slate-700">
+            <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse" />
+            <span className="text-xs font-bold text-cyan-400">LIVE</span>
+          </div>
+          <div className="animate-scroll flex gap-12 py-3 px-4 whitespace-nowrap">
+            {[...Array(16)].map((_, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <span className="font-bold text-white">{['AAPL', 'NVDA', 'TSLA', 'BTC', 'MSFT', 'ETH', 'AMZN', 'SOL'][i % 8]}</span>
+                <span className="text-slate-500 font-mono animate-pulse">---</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full bg-slate-900/50 border-y border-slate-800 overflow-hidden">
-      <div className="animate-scroll flex gap-12 py-3 whitespace-nowrap">
-        {[...tickers, ...tickers].map((ticker, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <span className="font-bold text-white">{ticker.symbol}</span>
-            <span className="text-slate-300 font-mono">${ticker.price}</span>
-            <span className={`font-mono ${ticker.change > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {ticker.change > 0 ? '+' : ''}{ticker.change}%
-            </span>
-          </div>
-        ))}
+      <div className="flex items-center">
+        <div className="flex items-center gap-2 px-4 py-3 bg-slate-800/50 border-r border-slate-700 shrink-0">
+          <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+          <span className="text-xs font-bold text-emerald-400">LIVE</span>
+        </div>
+        <div className="animate-scroll flex gap-12 py-3 px-4 whitespace-nowrap">
+          {[...tickers, ...tickers].map((ticker, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <span className={`font-bold ${ticker.type === 'crypto' ? 'text-orange-400' : 'text-white'}`}>
+                {ticker.type === 'crypto' && '₿ '}{ticker.symbol}
+              </span>
+              <span className="text-slate-300 font-mono">${formatPrice(ticker.price, ticker.type)}</span>
+              <span className={`font-mono ${ticker.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {ticker.change >= 0 ? '+' : ''}{ticker.change.toFixed(2)}%
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

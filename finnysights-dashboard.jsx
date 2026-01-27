@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { User, Settings, Bell, Shield, Eye, EyeOff, Camera, Check, X, TrendingUp, TrendingDown, Star, Trash2, Plus, Clock, DollarSign, PieChart, ChevronRight, Edit3, LogOut, Moon, Sun, Globe, Lock, Mail, Phone, Building, Calendar, BarChart3, Zap, AtSign, EyeOff as Anonymous } from 'lucide-react';
-import { auth } from './firebase.js';
+import React, { useState, useEffect, useRef } from 'react';
+import { User, Settings, Bell, Shield, Eye, EyeOff, Camera, Check, X, TrendingUp, TrendingDown, Star, Trash2, Plus, Clock, DollarSign, PieChart, ChevronRight, Edit3, LogOut, Moon, Sun, Globe, Lock, Mail, Phone, Building, Calendar, BarChart3, Zap, AtSign, EyeOff as Anonymous, Upload, Image } from 'lucide-react';
+import { auth, storage } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getUserProfile, updateUserProfile } from './firestore.js';
 
 // Avatar emoji options
@@ -99,11 +100,13 @@ const StatCard = ({ icon: Icon, label, value, subValue, color }) => (
 );
 
 // Profile Section
-const ProfileSection = ({ user, onUpdate, onSave }) => {
+const ProfileSection = ({ user, onUpdate, onSave, authUser }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState(user);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
   // Update formData when user prop changes
   useEffect(() => {
@@ -123,8 +126,49 @@ const ProfileSection = ({ user, onUpdate, onSave }) => {
   };
 
   const selectAvatar = (emoji) => {
-    setFormData({...formData, avatar: emoji});
+    setFormData({...formData, avatar: emoji, avatarType: 'emoji'});
     setShowAvatarPicker(false);
+  };
+
+  const handleImageUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file || !authUser) return;
+
+    // Validate file
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) { // 5MB limit
+      alert('Image must be less than 5MB');
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      // Create storage reference
+      const storageRef = ref(storage, `avatars/${authUser.uid}/${Date.now()}_${file.name}`);
+      
+      // Upload file
+      await uploadBytes(storageRef, file);
+      
+      // Get download URL
+      const downloadURL = await getDownloadURL(storageRef);
+      
+      // Update form data with image URL
+      setFormData({...formData, avatar: downloadURL, avatarType: 'image'});
+      setShowAvatarPicker(false);
+      
+      console.log('Avatar uploaded successfully:', downloadURL);
+    } catch (error) {
+      console.error('Error uploading avatar:', error);
+      alert('Failed to upload image. Please try again.');
+    }
+    setIsUploading(false);
+  };
+
+  const isAvatarImage = (avatar) => {
+    return avatar && (avatar.startsWith('http') || avatar.startsWith('data:'));
   };
 
   const displayName = formData.isAnonymous ? 'Anonymous User' : (formData.displayName || formData.email?.split('@')[0] || 'User');
@@ -175,9 +219,22 @@ const ProfileSection = ({ user, onUpdate, onSave }) => {
       <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50">
         <div className="flex items-center gap-6">
           <div className="relative">
-            <div className="w-24 h-24 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-2xl flex items-center justify-center text-4xl shadow-lg">
-              {formData.isAnonymous ? '🎭' : formData.avatar}
+            {/* Avatar Display - supports both emoji and image */}
+            <div className="w-24 h-24 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-2xl flex items-center justify-center text-4xl shadow-lg overflow-hidden">
+              {formData.isAnonymous ? (
+                '🎭'
+              ) : isAvatarImage(formData.avatar) ? (
+                <img 
+                  src={formData.avatar} 
+                  alt="Avatar" 
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                formData.avatar || '👨‍💼'
+              )}
             </div>
+            
+            {/* Edit Avatar Button */}
             {isEditing && (
               <button 
                 onClick={() => setShowAvatarPicker(!showAvatarPicker)}
@@ -189,8 +246,45 @@ const ProfileSection = ({ user, onUpdate, onSave }) => {
             
             {/* Avatar Picker Dropdown */}
             {showAvatarPicker && isEditing && (
-              <div className="absolute top-full left-0 mt-2 p-3 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50 w-64">
-                <p className="text-xs text-slate-400 mb-2 font-semibold">Choose Avatar</p>
+              <div className="absolute top-full left-0 mt-2 p-4 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50 w-72">
+                {/* Upload Photo Option */}
+                <div className="mb-4">
+                  <p className="text-xs text-slate-400 mb-2 font-semibold">Upload Photo</p>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleImageUpload}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-slate-700/50 hover:bg-slate-700 border border-slate-600 border-dashed rounded-lg text-sm text-slate-300 transition-all disabled:opacity-50"
+                  >
+                    {isUploading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={16} className="text-cyan-400" />
+                        Choose Image
+                      </>
+                    )}
+                  </button>
+                  <p className="text-xs text-slate-500 mt-1 text-center">Max 5MB • JPG, PNG, GIF</p>
+                </div>
+                
+                {/* Divider */}
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex-1 h-px bg-slate-700" />
+                  <span className="text-xs text-slate-500">or choose emoji</span>
+                  <div className="flex-1 h-px bg-slate-700" />
+                </div>
+                
+                {/* Emoji Options */}
                 <div className="grid grid-cols-6 gap-2">
                   {AVATAR_OPTIONS.map((emoji, i) => (
                     <button
@@ -850,7 +944,7 @@ export default function UserDashboard() {
   const renderSection = () => {
     switch (activeSection) {
       case 'profile':
-        return <ProfileSection user={user} onUpdate={setUser} onSave={handleSaveProfile} />;
+        return <ProfileSection user={user} onUpdate={setUser} onSave={handleSaveProfile} authUser={authUser} />;
       case 'watchlist':
         return <WatchlistSection />;
       case 'history':
@@ -858,7 +952,7 @@ export default function UserDashboard() {
       case 'account':
         return <AccountStatusSection />;
       default:
-        return <ProfileSection user={user} onUpdate={setUser} onSave={handleSaveProfile} />;
+        return <ProfileSection user={user} onUpdate={setUser} onSave={handleSaveProfile} authUser={authUser} />;
     }
   };
 
@@ -912,8 +1006,14 @@ export default function UserDashboard() {
           <div className="absolute bottom-4 left-4 right-4">
             <div className="p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-lg flex items-center justify-center text-lg">
-                  {user.isAnonymous ? '🎭' : user.avatar}
+                <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-lg flex items-center justify-center text-lg overflow-hidden">
+                  {user.isAnonymous ? '🎭' : (
+                    user.avatar && (user.avatar.startsWith('http') || user.avatar.startsWith('data:')) ? (
+                      <img src={user.avatar} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      user.avatar || '👨‍💼'
+                    )
+                  )}
                 </div>
                 <div>
                   <p className="font-semibold text-white text-sm">

@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Settings, Bell, Shield, Eye, EyeOff, Camera, Check, X, TrendingUp, TrendingDown, Star, Trash2, Plus, Clock, DollarSign, PieChart, ChevronRight, Edit3, LogOut, Moon, Sun, Globe, Lock, Mail, Phone, Building, Calendar, BarChart3, Zap, AtSign, EyeOff as Anonymous, Upload, Image } from 'lucide-react';
-import { auth, storage } from './firebase.js';
+import { auth } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getUserProfile, updateUserProfile } from './firestore.js';
 
 // Avatar emoji options
@@ -12,6 +11,33 @@ const AVATAR_OPTIONS = [
   '🚀', '💎', '📈', '🎯', '⚡', '🔥',
   '👑', '🎩', '🎭', '🤖', '👽', '🦄'
 ];
+
+// Helper: Resize image and convert to base64 (stored directly in Firestore)
+const resizeImage = (file, maxSize = 150) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = document.createElement('img');
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const size = Math.min(img.width, img.height);
+        const x = (img.width - size) / 2;
+        const y = (img.height - size) / 2;
+        
+        canvas.width = maxSize;
+        canvas.height = maxSize;
+        
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, x, y, size, size, 0, 0, maxSize, maxSize);
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
 
 // Thumbs Up Logo Component
 const ThumbsUpLogo = ({ size = 22, className = "" }) => (
@@ -132,7 +158,7 @@ const ProfileSection = ({ user, onUpdate, onSave, authUser }) => {
 
   const handleImageUpload = async (event) => {
     const file = event.target.files[0];
-    if (!file || !authUser) return;
+    if (!file) return;
 
     // Validate file
     if (!file.type.startsWith('image/')) {
@@ -146,23 +172,17 @@ const ProfileSection = ({ user, onUpdate, onSave, authUser }) => {
 
     setIsUploading(true);
     try {
-      // Create storage reference
-      const storageRef = ref(storage, `avatars/${authUser.uid}/${Date.now()}_${file.name}`);
+      // Resize and convert to base64 (stored directly in Firestore)
+      const base64Image = await resizeImage(file, 150);
       
-      // Upload file
-      await uploadBytes(storageRef, file);
-      
-      // Get download URL
-      const downloadURL = await getDownloadURL(storageRef);
-      
-      // Update form data with image URL
-      setFormData({...formData, avatar: downloadURL, avatarType: 'image'});
+      // Update form data with base64 image
+      setFormData({...formData, avatar: base64Image, avatarType: 'image'});
       setShowAvatarPicker(false);
       
-      console.log('Avatar uploaded successfully:', downloadURL);
+      console.log('Avatar ready to save');
     } catch (error) {
-      console.error('Error uploading avatar:', error);
-      alert('Failed to upload image. Please try again.');
+      console.error('Error processing image:', error);
+      alert('Failed to process image. Please try again.');
     }
     setIsUploading(false);
   };

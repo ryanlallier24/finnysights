@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Settings, Bell, Shield, Eye, EyeOff, Camera, Check, X, TrendingUp, TrendingDown, Star, Trash2, Plus, Clock, DollarSign, PieChart, ChevronRight, Edit3, LogOut, Moon, Sun, Globe, Lock, Mail, Phone, Building, Calendar, BarChart3, Zap, AtSign, EyeOff as Anonymous, Upload, Image } from 'lucide-react';
+import { User, Settings, Bell, Shield, Eye, EyeOff, Camera, Check, X, TrendingUp, TrendingDown, Star, Trash2, Plus, Clock, DollarSign, PieChart, ChevronRight, Edit3, LogOut, Moon, Sun, Globe, Lock, Mail, Phone, Building, Calendar, BarChart3, Zap, AtSign, EyeOff as Anonymous, Upload, Image, ArrowLeft, Home, LayoutDashboard } from 'lucide-react';
 import { auth } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { getUserProfile, updateUserProfile } from './firestore.js';
@@ -1004,15 +1004,24 @@ export default function UserDashboard() {
       <div className="relative z-10 flex">
         {/* Sidebar */}
         <aside className="w-64 min-h-screen bg-slate-900/50 border-r border-slate-800/50 p-4 sticky top-0">
-          {/* Logo */}
-          <div className="flex items-center gap-3 mb-8 px-2">
+          {/* Logo - Clickable to go back */}
+          <a href="/app" className="flex items-center gap-3 mb-6 px-2 hover:opacity-80 transition-opacity cursor-pointer">
             <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-xl flex items-center justify-center">
               <ThumbsUpLogo size={22} className="text-white" />
             </div>
             <span className="text-xl font-black bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
               finnysights
             </span>
-          </div>
+          </a>
+
+          {/* Back to Dashboard Button */}
+          <button
+            onClick={() => window.location.href = '/app'}
+            className="w-full flex items-center gap-3 px-4 py-3 mb-6 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-500/30 rounded-xl text-white font-semibold transition-all group"
+          >
+            <ArrowLeft size={18} className="text-cyan-400 group-hover:-translate-x-1 transition-transform" />
+            <span>Back to Dashboard</span>
+          </button>
 
           {/* Navigation */}
           <nav className="space-y-2">
@@ -1055,6 +1064,22 @@ export default function UserDashboard() {
 
         {/* Main content */}
         <main className="flex-1 p-8">
+          {/* Top Header with Back Button */}
+          <div className="flex items-center justify-between mb-8">
+            <button
+              onClick={() => window.location.href = '/app'}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 hover:bg-slate-700 border border-slate-700/50 rounded-lg text-slate-300 hover:text-white transition-all group"
+            >
+              <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
+              <span className="font-medium">Dashboard</span>
+            </button>
+            
+            <h1 className="text-xl font-bold text-white flex items-center gap-2">
+              <Settings size={20} className="text-cyan-400" />
+              Settings
+            </h1>
+          </div>
+          
           {renderSection()}
         </main>
       </div>

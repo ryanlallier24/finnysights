@@ -1,5 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, Settings, Bell, Shield, Eye, EyeOff, Camera, Check, X, TrendingUp, TrendingDown, Star, Trash2, Plus, Clock, DollarSign, PieChart, ChevronRight, Edit3, LogOut, Moon, Sun, Globe, Lock, Mail, Phone, Building, Calendar, BarChart3, Zap, AtSign, EyeOff as Anonymous } from 'lucide-react';
+import { auth } from './firebase.js';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { getUserProfile, updateUserProfile } from './firestore.js';
+
+// Avatar emoji options
+const AVATAR_OPTIONS = [
+  '👨‍💼', '👩‍💼', '🧑‍💼', '👨‍💻', '👩‍💻', '🧑‍💻', 
+  '🦁', '🐯', '🦊', '🐺', '🦅', '🦈', 
+  '🚀', '💎', '📈', '🎯', '⚡', '🔥',
+  '👑', '🎩', '🎭', '🤖', '👽', '🦄'
+];
 
 // Thumbs Up Logo Component
 const ThumbsUpLogo = ({ size = 22, className = "" }) => (
@@ -14,20 +25,20 @@ const ThumbsUpLogo = ({ size = 22, className = "" }) => (
   </svg>
 );
 
-// Mock user data
-const USER_DATA = {
-  displayName: 'TraderAlex',
+// Default user data (will be replaced by Firebase data)
+const DEFAULT_USER_DATA = {
+  displayName: '',
   firstName: '',
   lastName: '',
-  email: 'alex.thompson@email.com',
+  email: '',
   phone: '',
   company: '',
   avatar: '👨‍💼',
   plan: 'Free',
-  joinDate: 'Jan 2026',
-  totalTrades: 247,
-  winRate: 68,
-  totalProfit: 12847.50,
+  joinDate: '',
+  totalTrades: 0,
+  winRate: 0,
+  totalProfit: 0,
   isAnonymous: false,
 };
 
@@ -88,16 +99,35 @@ const StatCard = ({ icon: Icon, label, value, subValue, color }) => (
 );
 
 // Profile Section
-const ProfileSection = ({ user, onUpdate }) => {
+const ProfileSection = ({ user, onUpdate, onSave }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState(user);
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSave = () => {
-    onUpdate(formData);
-    setIsEditing(false);
+  // Update formData when user prop changes
+  useEffect(() => {
+    setFormData(user);
+  }, [user]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await onSave(formData);
+      onUpdate(formData);
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Error saving profile:', error);
+    }
+    setIsSaving(false);
   };
 
-  const displayName = formData.isAnonymous ? 'Anonymous User' : (formData.displayName || formData.email.split('@')[0]);
+  const selectAvatar = (emoji) => {
+    setFormData({...formData, avatar: emoji});
+    setShowAvatarPicker(false);
+  };
+
+  const displayName = formData.isAnonymous ? 'Anonymous User' : (formData.displayName || formData.email?.split('@')[0] || 'User');
 
   return (
     <div className="space-y-6">
@@ -122,10 +152,20 @@ const ProfileSection = ({ user, onUpdate }) => {
             </button>
             <button
               onClick={handleSave}
-              className="flex items-center gap-2 px-4 py-2 bg-cyan-500 rounded-lg text-sm font-semibold text-white hover:bg-cyan-400 transition-all"
+              disabled={isSaving}
+              className="flex items-center gap-2 px-4 py-2 bg-cyan-500 rounded-lg text-sm font-semibold text-white hover:bg-cyan-400 transition-all disabled:opacity-50"
             >
-              <Check size={16} />
-              Save Changes
+              {isSaving ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Check size={16} />
+                  Save Changes
+                </>
+              )}
             </button>
           </div>
         )}
@@ -136,12 +176,33 @@ const ProfileSection = ({ user, onUpdate }) => {
         <div className="flex items-center gap-6">
           <div className="relative">
             <div className="w-24 h-24 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-2xl flex items-center justify-center text-4xl shadow-lg">
-              {formData.isAnonymous ? '🎭' : user.avatar}
+              {formData.isAnonymous ? '🎭' : formData.avatar}
             </div>
             {isEditing && (
-              <button className="absolute -bottom-2 -right-2 p-2 bg-cyan-500 rounded-full text-white hover:bg-cyan-400 transition-all">
+              <button 
+                onClick={() => setShowAvatarPicker(!showAvatarPicker)}
+                className="absolute -bottom-2 -right-2 p-2 bg-cyan-500 rounded-full text-white hover:bg-cyan-400 transition-all"
+              >
                 <Camera size={14} />
               </button>
+            )}
+            
+            {/* Avatar Picker Dropdown */}
+            {showAvatarPicker && isEditing && (
+              <div className="absolute top-full left-0 mt-2 p-3 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50 w-64">
+                <p className="text-xs text-slate-400 mb-2 font-semibold">Choose Avatar</p>
+                <div className="grid grid-cols-6 gap-2">
+                  {AVATAR_OPTIONS.map((emoji, i) => (
+                    <button
+                      key={i}
+                      onClick={() => selectAvatar(emoji)}
+                      className={`w-9 h-9 text-xl rounded-lg hover:bg-slate-700 transition-all flex items-center justify-center ${formData.avatar === emoji ? 'bg-cyan-500/30 ring-2 ring-cyan-500' : ''}`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
           <div>
@@ -707,12 +768,89 @@ const AccountStatusSection = () => (
 // Main Dashboard Component
 export default function UserDashboard() {
   const [activeSection, setActiveSection] = useState('profile');
-  const [user, setUser] = useState(USER_DATA);
+  const [user, setUser] = useState(DEFAULT_USER_DATA);
+  const [authUser, setAuthUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Listen for Firebase auth changes and load profile
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        setAuthUser(firebaseUser);
+        
+        // Load user profile from Firestore
+        try {
+          const profile = await getUserProfile(firebaseUser.uid);
+          if (profile) {
+            setUser({
+              ...DEFAULT_USER_DATA,
+              ...profile,
+              email: firebaseUser.email || profile.email || '',
+              displayName: profile.displayName || firebaseUser.displayName || '',
+              joinDate: profile.createdAt ? new Date(profile.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'New Member',
+            });
+          } else {
+            // No profile yet, use auth data
+            setUser({
+              ...DEFAULT_USER_DATA,
+              email: firebaseUser.email || '',
+              displayName: firebaseUser.displayName || '',
+              joinDate: 'New Member',
+            });
+          }
+        } catch (error) {
+          console.error('Error loading profile:', error);
+          setUser({
+            ...DEFAULT_USER_DATA,
+            email: firebaseUser.email || '',
+            displayName: firebaseUser.displayName || '',
+          });
+        }
+      } else {
+        // Not logged in, redirect to home
+        window.location.href = '/';
+      }
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Save profile to Firestore
+  const handleSaveProfile = async (profileData) => {
+    if (!authUser) return;
+    
+    try {
+      await updateUserProfile(authUser.uid, {
+        displayName: profileData.displayName,
+        firstName: profileData.firstName,
+        lastName: profileData.lastName,
+        phone: profileData.phone,
+        company: profileData.company,
+        avatar: profileData.avatar,
+        isAnonymous: profileData.isAnonymous,
+      });
+      console.log('Profile saved successfully');
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      throw error;
+    }
+  };
+
+  // Handle sign out
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Sign out error:', error);
+    }
+  };
 
   const renderSection = () => {
     switch (activeSection) {
       case 'profile':
-        return <ProfileSection user={user} onUpdate={setUser} />;
+        return <ProfileSection user={user} onUpdate={setUser} onSave={handleSaveProfile} />;
       case 'watchlist':
         return <WatchlistSection />;
       case 'history':
@@ -720,9 +858,21 @@ export default function UserDashboard() {
       case 'account':
         return <AccountStatusSection />;
       default:
-        return <ProfileSection user={user} onUpdate={setUser} />;
+        return <ProfileSection user={user} onUpdate={setUser} onSave={handleSaveProfile} />;
     }
   };
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
+          <p className="text-slate-400">Loading your profile...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -767,12 +917,15 @@ export default function UserDashboard() {
                 </div>
                 <div>
                   <p className="font-semibold text-white text-sm">
-                    {user.isAnonymous ? 'Anonymous' : (user.displayName || user.email.split('@')[0])}
+                    {user.isAnonymous ? 'Anonymous' : (user.displayName || user.email?.split('@')[0] || 'User')}
                   </p>
                   <p className="text-xs text-slate-500">{user.plan} Plan</p>
                 </div>
               </div>
-              <button className="w-full flex items-center justify-center gap-2 py-2 bg-slate-700/50 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-700 transition-all">
+              <button 
+                onClick={handleSignOut}
+                className="w-full flex items-center justify-center gap-2 py-2 bg-slate-700/50 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-700 transition-all"
+              >
                 <LogOut size={16} />
                 Sign Out
               </button>

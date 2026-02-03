@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, Search, Globe, BarChart3, MessageSquare, Users, Zap, ChevronRight, Star, Clock, Volume2, Eye, Filter, Bell, Settings, RefreshCw, Activity, Plus, X, Check, Heart, Trash2, LogOut, Wifi, WifiOff, Loader, Send, Trophy, UserPlus, Target, Flame, Award, Bitcoin, Newspaper, ExternalLink, Briefcase, DollarSign, PieChart, BellRing, AlertTriangle } from 'lucide-react';
 import { auth } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { addToWatchlist, removeFromWatchlist, getWatchlist, recordVote, removeVote, getUserVotes, getUserProfile, addComment, getStockComments, likeComment, unlikeComment, getTopTraders, followUser, unfollowUser, addHolding, removeHolding, getPortfolio, addPriceAlert, removePriceAlert } from './firestore.js';
+import { addToWatchlist, removeFromWatchlist, getWatchlist, recordVote, removeVote, getUserVotes, getUserProfile, addComment, getStockComments, likeComment, unlikeComment, getTopTraders, followUser, unfollowUser, addHolding, removeHolding, getPortfolio, addPriceAlert, removePriceAlert, sendGlobalMessage, listenToGlobalChat, likeGlobalMessage, listenToAnnouncements, markAnnouncementRead, postAnnouncement, getUserAvatars } from './firestore.js';
 import { getMultipleQuotes, getQuote, searchStocks } from './stockApi.js';
 import { getCryptoMarketData, searchCrypto, formatCryptoPrice, formatMarketCap } from './cryptoApi.js';
 import { getCombinedNews, getStockNews, getCryptoNewsBySymbol, formatTimeAgo, truncateText } from './newsApi.js';
@@ -15,15 +15,34 @@ const ThumbsUpLogo = ({ size = 22, className = "" }) => (
 );
 
 const DEFAULT_STOCKS = [
-  { ticker: 'AAPL', name: 'Apple Inc.', sector: 'Technology', thumbsUp: 8934, thumbsDown: 1243, sentiment: 87, sentimentLabel: 'Very Bullish' },
-  { ticker: 'TSLA', name: 'Tesla Inc.', sector: 'Automotive', thumbsUp: 12453, thumbsDown: 8932, sentiment: 58, sentimentLabel: 'Neutral' },
-  { ticker: 'NVDA', name: 'NVIDIA Corp.', sector: 'Technology', thumbsUp: 15678, thumbsDown: 2134, sentiment: 92, sentimentLabel: 'Extremely Bullish' },
-  { ticker: 'MSFT', name: 'Microsoft Corp.', sector: 'Technology', thumbsUp: 7823, thumbsDown: 1923, sentiment: 81, sentimentLabel: 'Bullish' },
-  { ticker: 'AMZN', name: 'Amazon.com Inc.', sector: 'E-Commerce', thumbsUp: 6234, thumbsDown: 2341, sentiment: 73, sentimentLabel: 'Bullish' },
-  { ticker: 'GOOGL', name: 'Alphabet Inc.', sector: 'Technology', thumbsUp: 9234, thumbsDown: 2134, sentiment: 81, sentimentLabel: 'Bullish' },
-  { ticker: 'META', name: 'Meta Platforms', sector: 'Technology', thumbsUp: 7823, thumbsDown: 3421, sentiment: 70, sentimentLabel: 'Bullish' },
-  { ticker: 'JPM', name: 'JPMorgan Chase', sector: 'Finance', thumbsUp: 4523, thumbsDown: 1876, sentiment: 71, sentimentLabel: 'Bullish' },
+  { ticker: 'AAPL', name: 'Apple Inc.', sector: 'Technology', thumbsUp: 8934, thumbsDown: 1243, sentiment: 87, sentimentLabel: 'Very Bullish', avgVolume: 58200000 },
+  { ticker: 'TSLA', name: 'Tesla Inc.', sector: 'Automotive', thumbsUp: 12453, thumbsDown: 8932, sentiment: 58, sentimentLabel: 'Neutral', avgVolume: 112500000 },
+  { ticker: 'NVDA', name: 'NVIDIA Corp.', sector: 'Technology', thumbsUp: 15678, thumbsDown: 2134, sentiment: 92, sentimentLabel: 'Extremely Bullish', avgVolume: 42300000 },
+  { ticker: 'MSFT', name: 'Microsoft Corp.', sector: 'Technology', thumbsUp: 7823, thumbsDown: 1923, sentiment: 81, sentimentLabel: 'Bullish', avgVolume: 22100000 },
+  { ticker: 'AMZN', name: 'Amazon.com Inc.', sector: 'E-Commerce', thumbsUp: 6234, thumbsDown: 2341, sentiment: 73, sentimentLabel: 'Bullish', avgVolume: 37800000 },
+  { ticker: 'GOOGL', name: 'Alphabet Inc.', sector: 'Technology', thumbsUp: 9234, thumbsDown: 2134, sentiment: 81, sentimentLabel: 'Bullish', avgVolume: 25400000 },
+  { ticker: 'META', name: 'Meta Platforms', sector: 'Technology', thumbsUp: 7823, thumbsDown: 3421, sentiment: 70, sentimentLabel: 'Bullish', avgVolume: 19200000 },
+  { ticker: 'JPM', name: 'JPMorgan Chase', sector: 'Finance', thumbsUp: 4523, thumbsDown: 1876, sentiment: 71, sentimentLabel: 'Bullish', avgVolume: 9800000 },
 ];
+
+// Format volume numbers
+const formatVolume = (vol) => {
+  if (!vol || vol === 0) return '—';
+  if (vol >= 1e9) return (vol / 1e9).toFixed(1) + 'B';
+  if (vol >= 1e6) return (vol / 1e6).toFixed(1) + 'M';
+  if (vol >= 1e3) return (vol / 1e3).toFixed(1) + 'K';
+  return vol.toLocaleString();
+};
+
+// Simulate live volume (varies around avg)
+const getLiveVolume = (avgVolume) => {
+  if (!avgVolume) return 0;
+  const now = new Date();
+  const hours = now.getHours();
+  const marketProgress = Math.max(0, Math.min(1, (hours - 9.5) / 6.5));
+  const variance = 0.7 + Math.random() * 0.6;
+  return Math.floor(avgVolume * marketProgress * variance);
+};
 
 const EXCHANGES = [
   { id: 'nyse', name: 'NYSE', country: 'US', flag: '🇺🇸', status: 'open', change: 0.42 },
@@ -146,6 +165,21 @@ const MarketCountdown = () => {
 const CRYPTO_ICONS = { BTC: '₿', ETH: 'Ξ', BNB: '◆', SOL: '◎', XRP: '✕', ADA: '₳', DOGE: 'Ð', DOT: '●', MATIC: '⬡', LTC: 'Ł' };
 const AVATARS = ['👨‍💼', '👩‍💼', '🧑‍💻', '👨‍🚀', '🦊', '🐺', '🦁', '🐯', '🦅', '🐋', '🎯', '📊', '💹', '🚀'];
 const getAvatar = (uid) => AVATARS[uid?.charCodeAt(0) % AVATARS.length] || '👤';
+
+// Avatar Display component - handles both emoji and uploaded image avatars
+const AvatarDisplay = ({ avatar, size = 'md', className = '' }) => {
+  const sizeClasses = { sm: 'w-6 h-6 text-sm', md: 'w-8 h-8 text-lg', lg: 'w-10 h-10 text-xl' };
+  const isImage = avatar && (avatar.startsWith('http') || avatar.startsWith('data:'));
+  return (
+    <div className={`${sizeClasses[size]} rounded-full flex items-center justify-center overflow-hidden bg-gradient-to-br from-cyan-400/20 to-purple-500/20 flex-shrink-0 ${className}`}>
+      {isImage ? (
+        <img src={avatar} alt="Avatar" className="w-full h-full object-cover" />
+      ) : (
+        <span>{avatar || '👤'}</span>
+      )}
+    </div>
+  );
+};
 
 const AnimatedBackground = () => (
   <div className="fixed inset-0 overflow-hidden pointer-events-none">
@@ -607,7 +641,7 @@ const StockCard = ({ stock, onSelect, isSelected, isInWatchlist, onToggleWatchli
     <div onClick={() => onSelect(stock)} className={`relative group p-4 rounded-xl border transition-all duration-300 cursor-pointer overflow-hidden ${isSelected ? 'bg-cyan-500/10 border-cyan-500/50 shadow-lg shadow-cyan-500/20' : 'bg-slate-800/30 border-slate-700/50 hover:border-cyan-500/30'}`}>
       <div className="relative">
         <div className="flex items-start justify-between mb-3"><div className="flex items-center gap-2"><div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold ${change >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>{stock.ticker.substring(0, 2)}</div><div><h4 className="font-bold text-white text-sm">{stock.ticker}</h4><p className="text-[10px] text-slate-400 truncate max-w-[100px]">{stock.name}</p></div></div><button onClick={handleWatchlistToggle} disabled={isAdding} className={`p-1.5 rounded-lg transition-all ${isInWatchlist ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700/50 text-slate-400 hover:text-amber-400'}`}>{isAdding ? <RefreshCw size={14} className="animate-spin" /> : <Star size={14} className={isInWatchlist ? 'fill-amber-400' : ''} />}</button></div>
-        <div className="flex items-end justify-between mb-3"><div>{isLoading ? (<div className="animate-pulse"><div className="h-6 w-20 bg-slate-700 rounded mb-1"></div><div className="h-4 w-14 bg-slate-700 rounded"></div></div>) : (<><p className="text-xl font-bold font-mono text-white">${price.toFixed(2)}</p><div className={`flex items-center gap-1 ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{change >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}<span className="text-xs font-mono">{change >= 0 ? '+' : ''}{change.toFixed(2)}%</span></div></>)}</div><SentimentMeter score={stock.sentiment || 50} size="sm" /></div>
+        <div className="flex items-end justify-between mb-3"><div>{isLoading ? (<div className="animate-pulse"><div className="h-6 w-20 bg-slate-700 rounded mb-1"></div><div className="h-4 w-14 bg-slate-700 rounded"></div></div>) : (<><p className="text-xl font-bold font-mono text-white">${price.toFixed(2)}</p><div className={`flex items-center gap-1 ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{change >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}<span className="text-xs font-mono">{change >= 0 ? '+' : ''}{change.toFixed(2)}%</span></div></>)}</div><div className="text-right"><div className="flex items-center gap-1 text-slate-400 mb-1"><Activity size={10} /><span className="text-[9px] font-bold">VOL</span></div><p className="text-xs font-mono text-slate-300">{formatVolume(getLiveVolume(stock.avgVolume))}</p></div></div>
         <div className="flex items-center gap-2"><button onClick={(e) => handleVote('up', e)} disabled={isVoting} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${userVote === 'bullish' ? 'bg-emerald-500 text-white' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}><ThumbsUp size={12} className={userVote === 'bullish' ? 'fill-white' : ''} /><span className="text-xs font-bold">{localVotes.up.toLocaleString()}</span></button><button onClick={(e) => handleVote('down', e)} disabled={isVoting} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${userVote === 'bearish' ? 'bg-rose-500 text-white' : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'}`}><ThumbsDown size={12} className={userVote === 'bearish' ? 'fill-white' : ''} /><span className="text-xs font-bold">{localVotes.down.toLocaleString()}</span></button></div>
         <div className="mt-2 h-1 bg-slate-700/50 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all" style={{ width: `${bullishPercent}%` }} /></div>
         <p className="text-[10px] text-slate-500 mt-1 text-center">{bullishPercent}% Bullish</p>
@@ -629,7 +663,7 @@ const CryptoCard = ({ crypto, onSelect, isSelected, isInWatchlist, onToggleWatch
       <div className="relative">
         <div className="absolute top-0 right-0 px-1.5 py-0.5 bg-orange-500/20 rounded text-[9px] font-bold text-orange-400">CRYPTO</div>
         <div className="flex items-start justify-between mb-3"><div className="flex items-center gap-2"><div className={`w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden ${change >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>{crypto.image ? <img src={crypto.image} alt={crypto.symbol} className="w-7 h-7 rounded-full" /> : <span className={`text-lg font-bold ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{CRYPTO_ICONS[crypto.symbol] || crypto.symbol.substring(0, 2)}</span>}</div><div><h4 className="font-bold text-white text-sm">{crypto.symbol}</h4><p className="text-[10px] text-slate-400 truncate max-w-[100px]">{crypto.name}</p></div></div><button onClick={handleWatchlistToggle} disabled={isAdding} className={`p-1.5 rounded-lg transition-all mt-4 ${isInWatchlist ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700/50 text-slate-400 hover:text-amber-400'}`}>{isAdding ? <RefreshCw size={14} className="animate-spin" /> : <Star size={14} className={isInWatchlist ? 'fill-amber-400' : ''} />}</button></div>
-        <div className="flex items-end justify-between mb-3"><div>{isLoading ? (<div className="animate-pulse"><div className="h-6 w-20 bg-slate-700 rounded mb-1"></div><div className="h-4 w-14 bg-slate-700 rounded"></div></div>) : (<><p className="text-xl font-bold font-mono text-white">{formatCryptoPrice(crypto.price)}</p><div className={`flex items-center gap-1 ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{change >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}<span className="text-xs font-mono">{change >= 0 ? '+' : ''}{change.toFixed(2)}%</span></div></>)}</div><div className="text-right"><p className="text-[10px] text-slate-500">MCap</p><p className="text-xs font-mono text-slate-400">{formatMarketCap(crypto.marketCap)}</p></div></div>
+        <div className="flex items-end justify-between mb-3"><div>{isLoading ? (<div className="animate-pulse"><div className="h-6 w-20 bg-slate-700 rounded mb-1"></div><div className="h-4 w-14 bg-slate-700 rounded"></div></div>) : (<><p className="text-xl font-bold font-mono text-white">{formatCryptoPrice(crypto.price)}</p><div className={`flex items-center gap-1 ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{change >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}<span className="text-xs font-mono">{change >= 0 ? '+' : ''}{change.toFixed(2)}%</span></div></>)}</div><div className="text-right"><p className="text-[10px] text-slate-500">MCap</p><p className="text-xs font-mono text-slate-400">{formatMarketCap(crypto.marketCap)}</p><div className="flex items-center justify-end gap-1 mt-1 text-slate-400"><Activity size={9} /><span className="text-[9px]">Vol</span></div><p className="text-[10px] font-mono text-slate-400">{formatVolume(crypto.volume)}</p></div></div>
         <div className="flex items-center gap-2"><button onClick={(e) => handleVote('up', e)} disabled={isVoting} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${userVote === 'bullish' ? 'bg-emerald-500 text-white' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}><ThumbsUp size={12} className={userVote === 'bullish' ? 'fill-white' : ''} /><span className="text-xs font-bold">{localVotes.up.toLocaleString()}</span></button><button onClick={(e) => handleVote('down', e)} disabled={isVoting} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${userVote === 'bearish' ? 'bg-rose-500 text-white' : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'}`}><ThumbsDown size={12} className={userVote === 'bearish' ? 'fill-white' : ''} /><span className="text-xs font-bold">{localVotes.down.toLocaleString()}</span></button></div>
         <div className="mt-2 h-1 bg-slate-700/50 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all" style={{ width: `${bullishPercent}%` }} /></div>
         <p className="text-[10px] text-slate-500 mt-1 text-center">{bullishPercent}% Bullish</p>
@@ -666,19 +700,244 @@ const DetailPanel = ({ item, onClose, userVote, isLoading, currentUser, comments
   );
 };
 
-const Leaderboard = ({ leaders, currentUser, onFollow, followingList }) => {
+const Leaderboard = ({ leaders, currentUser, onFollow, followingList, avatarMap }) => {
   const getRankBadge = (rank) => { if (rank === 1) return { bg: 'bg-amber-500', icon: '🥇' }; if (rank === 2) return { bg: 'bg-slate-400', icon: '🥈' }; if (rank === 3) return { bg: 'bg-amber-700', icon: '🥉' }; return { bg: 'bg-slate-700', icon: rank }; };
   const getAccuracyColor = (accuracy) => { if (accuracy >= 70) return 'text-emerald-400'; if (accuracy >= 50) return 'text-amber-400'; return 'text-rose-400'; };
+  
+  const getLeaderAvatar = (uid) => {
+    if (avatarMap && avatarMap[uid]) return avatarMap[uid].avatar;
+    return getAvatar(uid);
+  };
+  
   return (
     <div className="bg-slate-800/30 rounded-xl border border-slate-700/50 p-4">
       <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2 mb-1"><Trophy size={14} className="text-amber-400" />Top Traders</h3>
       <p className="text-[10px] text-slate-500 mb-3">Ranked by accuracy & engagement</p>
       <div className="space-y-2">
         {leaders.map((leader, i) => { const rank = getRankBadge(i + 1); const isFollowing = followingList?.includes(leader.uid);
-          return (<div key={leader.uid} className="p-2 rounded-lg bg-slate-900/30 hover:bg-slate-700/30 transition-colors"><div className="flex items-center gap-2"><span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${rank.bg} text-white`}>{typeof rank.icon === 'string' ? rank.icon : i + 1}</span><span className="text-lg">{getAvatar(leader.uid)}</span><div className="flex-1 min-w-0"><p className="text-sm font-bold text-white truncate">{leader.displayName}</p><div className="flex items-center gap-2 text-[10px]"><span className={`flex items-center gap-0.5 ${getAccuracyColor(leader.accuracy)}`}><Target size={10} />{leader.accuracy}%</span>{leader.streak > 0 && <span className="flex items-center gap-0.5 text-orange-400"><Flame size={10} />{leader.streak}</span>}</div></div><div className="text-right"><p className="text-sm font-bold text-cyan-400">{leader.reputationScore}</p><p className="text-[9px] text-slate-500">REP</p></div>{currentUser && currentUser.uid !== leader.uid && (<button onClick={() => onFollow(leader.uid)} className={`p-1.5 rounded transition-colors ${isFollowing ? 'bg-slate-600 text-slate-400' : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400'}`}>{isFollowing ? <Check size={12} /> : <UserPlus size={12} />}</button>)}</div></div>);
+          return (<div key={leader.uid} className="p-2 rounded-lg bg-slate-900/30 hover:bg-slate-700/30 transition-colors"><div className="flex items-center gap-2"><span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${rank.bg} text-white`}>{typeof rank.icon === 'string' ? rank.icon : i + 1}</span><AvatarDisplay avatar={getLeaderAvatar(leader.uid)} size="md" /><div className="flex-1 min-w-0"><p className="text-sm font-bold text-white truncate">{leader.displayName}</p><div className="flex items-center gap-2 text-[10px]"><span className={`flex items-center gap-0.5 ${getAccuracyColor(leader.accuracy)}`}><Target size={10} />{leader.accuracy}%</span>{leader.streak > 0 && <span className="flex items-center gap-0.5 text-orange-400"><Flame size={10} />{leader.streak}</span>}</div></div><div className="text-right"><p className="text-sm font-bold text-cyan-400">{leader.reputationScore}</p><p className="text-[9px] text-slate-500">REP</p></div>{currentUser && currentUser.uid !== leader.uid && (<button onClick={() => onFollow(leader.uid)} className={`p-1.5 rounded transition-colors ${isFollowing ? 'bg-slate-600 text-slate-400' : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400'}`}>{isFollowing ? <Check size={12} /> : <UserPlus size={12} />}</button>)}</div></div>);
         })}
         {leaders.length === 0 && <div className="text-center py-4"><Award size={24} className="mx-auto text-slate-600 mb-2" /><p className="text-slate-500 text-sm">No traders yet</p></div>}
       </div>
+    </div>
+  );
+};
+
+// Global Community Chat
+const GlobalChat = ({ currentUser, userProfile }) => {
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
+  const messagesEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
+
+  useEffect(() => {
+    const unsubscribe = listenToGlobalChat(50, (msgs) => {
+      setMessages(msgs);
+    });
+    return () => unsubscribe && unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (messagesEndRef.current && isExpanded) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isExpanded]);
+
+  const handleSend = async () => {
+    if (!currentUser || !newMessage.trim()) return;
+    setIsSending(true);
+    const avatar = userProfile?.avatar || getAvatar(currentUser.uid);
+    const displayName = userProfile?.displayName || currentUser.displayName || currentUser.email?.split('@')[0] || 'Trader';
+    await sendGlobalMessage(currentUser.uid, displayName, newMessage.trim(), avatar);
+    setNewMessage('');
+    setIsSending(false);
+  };
+
+  const timeAgo = (dateStr) => {
+    if (!dateStr) return '';
+    const diff = Date.now() - new Date(dateStr).getTime();
+    if (diff < 60000) return 'now';
+    if (diff < 3600000) return Math.floor(diff / 60000) + 'm';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h';
+    return Math.floor(diff / 86400000) + 'd';
+  };
+
+  return (
+    <div className="bg-slate-800/30 rounded-xl border border-slate-700/50 overflow-hidden">
+      {/* Header */}
+      <button onClick={() => setIsExpanded(!isExpanded)} className="w-full flex items-center justify-between p-4 hover:bg-slate-700/20 transition-colors">
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Globe size={14} className="text-cyan-400" />
+            <div className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-300">Global Chat</h3>
+          <span className="text-[10px] px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 rounded-full font-bold">{messages.length}</span>
+        </div>
+        <ChevronRight size={14} className={`text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+      </button>
+
+      {isExpanded && (
+        <>
+          {/* Messages */}
+          <div ref={chatContainerRef} className="h-64 overflow-y-auto px-4 space-y-3 scrollbar-thin">
+            {messages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-center py-6">
+                <MessageSquare size={24} className="text-slate-600 mb-2" />
+                <p className="text-slate-500 text-sm">No messages yet</p>
+                <p className="text-slate-600 text-xs">Start the conversation!</p>
+              </div>
+            ) : messages.map((msg) => (
+              <div key={msg.id} className={`flex gap-2 ${msg.uid === currentUser?.uid ? 'flex-row-reverse' : ''}`}>
+                <AvatarDisplay avatar={msg.avatar} size="sm" />
+                <div className={`max-w-[80%] ${msg.uid === currentUser?.uid ? 'text-right' : ''}`}>
+                  <div className="flex items-center gap-1.5 mb-0.5" style={{ justifyContent: msg.uid === currentUser?.uid ? 'flex-end' : 'flex-start' }}>
+                    <span className="text-[10px] font-bold text-slate-300">{msg.displayName}</span>
+                    <span className="text-[9px] text-slate-600">{timeAgo(msg.createdAt)}</span>
+                  </div>
+                  <div className={`inline-block px-3 py-1.5 rounded-xl text-xs leading-relaxed ${
+                    msg.uid === currentUser?.uid
+                      ? 'bg-cyan-500/20 text-cyan-100 rounded-tr-sm'
+                      : 'bg-slate-700/50 text-slate-300 rounded-tl-sm'
+                  }`}>
+                    {msg.content}
+                  </div>
+                </div>
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input */}
+          <div className="p-3 border-t border-slate-700/50">
+            {currentUser ? (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  placeholder="Message the community..."
+                  className="flex-1 px-3 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
+                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+                  maxLength={500}
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={isSending || !newMessage.trim()}
+                  className="px-3 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 rounded-lg transition-colors"
+                >
+                  {isSending ? <Loader size={16} className="animate-spin" /> : <Send size={16} />}
+                </button>
+              </div>
+            ) : (
+              <p className="text-center text-slate-500 text-xs py-2">
+                <a href="/" className="text-cyan-400 hover:underline">Sign in</a> to join the chat
+              </p>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+// Announcement Bell with notifications
+const AnnouncementBell = ({ currentUser, announcements, unreadCount, onMarkRead }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const bellRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (bellRef.current && !bellRef.current.contains(e.target)) setIsOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleOpen = () => {
+    setIsOpen(!isOpen);
+    if (!isOpen && unreadCount > 0 && currentUser) {
+      announcements.forEach(a => {
+        if (!a.readBy?.includes(currentUser.uid)) {
+          onMarkRead(a.id);
+        }
+      });
+    }
+  };
+
+  const getTypeIcon = (type) => {
+    switch(type) {
+      case 'feature': return { icon: '🚀', color: 'text-cyan-400', bg: 'bg-cyan-500/20' };
+      case 'alert': return { icon: '⚠️', color: 'text-amber-400', bg: 'bg-amber-500/20' };
+      case 'maintenance': return { icon: '🔧', color: 'text-orange-400', bg: 'bg-orange-500/20' };
+      default: return { icon: '📢', color: 'text-purple-400', bg: 'bg-purple-500/20' };
+    }
+  };
+
+  const timeAgo = (dateStr) => {
+    if (!dateStr) return '';
+    const diff = Date.now() - new Date(dateStr).getTime();
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+    return Math.floor(diff / 86400000) + 'd ago';
+  };
+
+  return (
+    <div ref={bellRef} className="relative">
+      <button onClick={handleOpen} className="relative p-2 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:bg-slate-700/50 transition-colors">
+        <BellRing size={18} className={unreadCount > 0 ? 'text-amber-400' : 'text-slate-400'} />
+        {unreadCount > 0 && (
+          <span className="absolute -top-1 -right-1 w-5 h-5 bg-rose-500 rounded-full flex items-center justify-center text-[10px] font-bold text-white animate-bounce">
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </span>
+        )}
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 top-full mt-2 w-80 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+          <div className="p-3 border-b border-slate-700/50 flex items-center justify-between">
+            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+              <BellRing size={14} className="text-amber-400" />
+              Notifications
+            </h4>
+            {unreadCount > 0 && (
+              <span className="text-[10px] px-2 py-0.5 bg-rose-500/20 text-rose-400 rounded-full font-bold">
+                {unreadCount} new
+              </span>
+            )}
+          </div>
+          <div className="max-h-72 overflow-y-auto">
+            {announcements.length === 0 ? (
+              <div className="p-6 text-center">
+                <Bell size={24} className="mx-auto text-slate-600 mb-2" />
+                <p className="text-slate-500 text-sm">No notifications yet</p>
+              </div>
+            ) : announcements.map((a) => {
+              const typeInfo = getTypeIcon(a.type);
+              const isUnread = currentUser && !a.readBy?.includes(currentUser.uid);
+              return (
+                <div key={a.id} className={`p-3 border-b border-slate-700/30 hover:bg-slate-700/20 transition-colors ${isUnread ? 'bg-cyan-500/5 border-l-2 border-l-cyan-500' : ''}`}>
+                  <div className="flex gap-2">
+                    <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${typeInfo.bg}`}>{typeInfo.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-xs font-bold text-white">{a.displayName}</span>
+                        <span className={`text-[9px] px-1 py-0.5 rounded ${typeInfo.bg} ${typeInfo.color} font-bold`}>{a.type}</span>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed">{a.content}</p>
+                      <p className="text-[10px] text-slate-500 mt-1">{timeAgo(a.createdAt)}</p>
+                    </div>
+                    {isUnread && <div className="w-2 h-2 bg-cyan-400 rounded-full flex-shrink-0 mt-1" />}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -723,6 +982,11 @@ export default function Finnysights() {
   // Alerts state
   const [alerts, setAlerts] = useState([]);
   const [triggeredAlert, setTriggeredAlert] = useState(null);
+  
+  // Global chat, announcements, avatar map
+  const [announcements, setAnnouncements] = useState([]);
+  const [unreadAnnouncements, setUnreadAnnouncements] = useState(0);
+  const [avatarMap, setAvatarMap] = useState({});
 
   const fetchNews = useCallback(async () => { setIsLoadingNews(true); const newsData = await getCombinedNews(); setNews(newsData); setIsLoadingNews(false); }, []);
   const fetchItemNews = useCallback(async (symbol, isCrypto) => { setIsLoadingItemNews(true); let newsData; if (isCrypto) { newsData = await getCryptoNewsBySymbol(symbol); } else { newsData = await getStockNews(symbol); } setItemNews(newsData || []); setIsLoadingItemNews(false); }, []);
@@ -793,6 +1057,32 @@ export default function Finnysights() {
   useEffect(() => { updatePortfolioPrices(); }, [stocks, cryptos, updatePortfolioPrices]);
   useEffect(() => { if (currentUser) fetchPortfolio(); }, [currentUser, fetchPortfolio]);
   
+  // Fetch real avatars when leaders change
+  useEffect(() => {
+    if (leaders.length > 0) {
+      const uids = leaders.map(l => l.uid);
+      getUserAvatars(uids).then(map => setAvatarMap(map));
+    }
+  }, [leaders]);
+
+  // Listen to announcements in real-time
+  useEffect(() => {
+    const unsubscribe = listenToAnnouncements((anns) => {
+      setAnnouncements(anns);
+      if (currentUser) {
+        const unread = anns.filter(a => !a.readBy?.includes(currentUser.uid)).length;
+        setUnreadAnnouncements(unread);
+      }
+    });
+    return () => unsubscribe && unsubscribe();
+  }, [currentUser]);
+
+  const handleMarkAnnouncementRead = async (announcementId) => {
+    if (!currentUser) return;
+    await markAnnouncementRead(currentUser.uid, announcementId);
+    setUnreadAnnouncements(prev => Math.max(0, prev - 1));
+  };
+  
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
@@ -845,7 +1135,7 @@ export default function Finnysights() {
             </div>
             <div className="flex items-center gap-2">
               <button onClick={fetchAllPrices} disabled={isLoading} className="p-2.5 bg-slate-800/50 hover:bg-slate-700/50 rounded-xl border border-slate-700/50"><RefreshCw size={18} className={`text-slate-400 ${isLoading ? 'animate-spin' : ''}`} /></button>
-              {currentUser ? (<><a href="/dashboard" className="p-2.5 bg-slate-800/50 hover:bg-slate-700/50 rounded-xl border border-slate-700/50"><Settings size={18} className="text-slate-400" /></a><button onClick={handleSignOut} className="p-2.5 bg-slate-800/50 hover:bg-slate-700/50 rounded-xl border border-slate-700/50"><LogOut size={18} className="text-slate-400" /></button><div className="w-9 h-9 bg-gradient-to-br from-cyan-400 to-purple-500 rounded-xl flex items-center justify-center text-sm font-bold">{currentUser.email?.charAt(0).toUpperCase()}</div></>) : (<a href="/" className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-xl text-sm font-bold hover:from-cyan-400 hover:to-purple-400">Sign In</a>)}
+              {currentUser ? (<><AnnouncementBell currentUser={currentUser} announcements={announcements} unreadCount={unreadAnnouncements} onMarkRead={handleMarkAnnouncementRead} /><a href="/dashboard" className="p-2.5 bg-slate-800/50 hover:bg-slate-700/50 rounded-xl border border-slate-700/50"><Settings size={18} className="text-slate-400" /></a><button onClick={handleSignOut} className="p-2.5 bg-slate-800/50 hover:bg-slate-700/50 rounded-xl border border-slate-700/50"><LogOut size={18} className="text-slate-400" /></button><AvatarDisplay avatar={userProfile?.avatar || getAvatar(currentUser.uid)} size="lg" className="ring-2 ring-cyan-500/30" /></>) : (<a href="/" className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-xl text-sm font-bold hover:from-cyan-400 hover:to-purple-400">Sign In</a>)}
             </div>
           </div>
         </div>
@@ -878,7 +1168,8 @@ export default function Finnysights() {
           
           <div className="space-y-4">
             {selectedItem ? (<DetailPanel item={selectedItem} onClose={() => setSelectedItem(null)} userVote={getUserVoteForSymbol(selectedIsCrypto ? selectedItem.symbol : selectedItem.ticker)} isLoading={isLoading} currentUser={currentUser} comments={comments} onAddComment={handleAddComment} onRefreshComments={fetchComments} isCrypto={selectedIsCrypto} news={itemNews} isLoadingNews={isLoadingItemNews} />) : (<div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700/50 text-center"><BarChart3 size={32} className="mx-auto text-slate-600 mb-3" /><p className="text-slate-400 text-sm">Select a stock or crypto to view details</p></div>)}
-            <Leaderboard leaders={leaders} currentUser={currentUser} onFollow={handleFollow} followingList={userProfile?.following || []} />
+            <Leaderboard leaders={leaders} currentUser={currentUser} onFollow={handleFollow} followingList={userProfile?.following || []} avatarMap={avatarMap} />
+            <GlobalChat currentUser={currentUser} userProfile={userProfile} />
           </div>
         </div>
       </main>

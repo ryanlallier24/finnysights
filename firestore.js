@@ -4,19 +4,19 @@ import {
   doc, 
   setDoc, 
   getDoc, 
-  getDocs,
   updateDoc, 
-  deleteDoc,
   arrayUnion, 
   arrayRemove,
   serverTimestamp,
-  increment,
   collection,
+  addDoc,
   query,
-  where,
   orderBy,
   limit,
-  addDoc
+  getDocs,
+  onSnapshot,
+  where,
+  Timestamp
 } from 'firebase/firestore';
 
 // ============================================
@@ -48,50 +48,20 @@ export const createUserProfile = async (user) => {
       },
       // Empty watchlist to start
       watchlist: [],
-      // Voting history - stores as object for easier lookup
-      votes: {},
-      // Social features
-      followers: [],
-      following: [],
-      followerCount: 0,
-      followingCount: 0,
-      bio: '',
-      // Enhanced ranking stats
-      totalVotes: 0,
-      correctPredictions: 0,
-      accuracy: 0,
-      streak: 0,
-      bestStreak: 0,
-      totalLikesReceived: 0,
-      reputationScore: 0,
+      // Voting history
+      votes: [],
     };
     
     await setDoc(userRef, userData);
     console.log('New user profile created');
     return userData;
   } else {
-    // Existing user - update last login AND ensure new fields exist
-    const existingData = userSnap.data();
-    const updates = {
+    // Existing user - update last login
+    await updateDoc(userRef, {
       lastLogin: serverTimestamp(),
-    };
-    
-    // Add missing fields for existing users (migration)
-    if (existingData.totalVotes === undefined) updates.totalVotes = 0;
-    if (existingData.correctPredictions === undefined) updates.correctPredictions = 0;
-    if (existingData.accuracy === undefined) updates.accuracy = 0;
-    if (existingData.streak === undefined) updates.streak = 0;
-    if (existingData.bestStreak === undefined) updates.bestStreak = 0;
-    if (existingData.totalLikesReceived === undefined) updates.totalLikesReceived = 0;
-    if (existingData.reputationScore === undefined) updates.reputationScore = 0;
-    if (existingData.followers === undefined) updates.followers = [];
-    if (existingData.following === undefined) updates.following = [];
-    if (existingData.followerCount === undefined) updates.followerCount = 0;
-    if (existingData.followingCount === undefined) updates.followingCount = 0;
-    
-    await updateDoc(userRef, updates);
-    console.log('User profile updated with new fields');
-    return { ...existingData, ...updates };
+    });
+    console.log('User profile updated');
+    return userSnap.data();
   }
 };
 
@@ -103,7 +73,7 @@ export const getUserProfile = async (uid) => {
   const userSnap = await getDoc(userRef);
   
   if (userSnap.exists()) {
-    return { uid, ...userSnap.data() };
+    return userSnap.data();
   }
   return null;
 };
@@ -153,6 +123,7 @@ export const removeFromWatchlist = async (uid, symbol) => {
   if (!uid || !symbol) return false;
   
   try {
+    // First get the current watchlist to find the exact item
     const userProfile = await getUserProfile(uid);
     if (!userProfile) return false;
     
@@ -209,530 +180,27 @@ export const getUserSettings = async (uid) => {
 };
 
 // ============================================
-// ENHANCED VOTING WITH PREDICTION TRACKING
+// VOTING FUNCTIONS
 // ============================================
 
-// Record or update a user's vote on a stock (with price tracking for accuracy)
-export const recordVote = async (uid, symbol, vote, currentPrice = null) => {
+// Record a user's vote on a stock
+export const recordVote = async (uid, symbol, vote) => {
   if (!uid || !symbol || !vote) return false;
   
   try {
     const userRef = doc(db, 'users', uid);
-    const stockVotesRef = doc(db, 'stockVotes', symbol);
-    
-    // Get user's current votes
-    const userProfile = await getUserProfile(uid);
-    const currentVotes = userProfile?.votes || {};
-    const previousVote = currentVotes[symbol];
-    const currentTotalVotes = userProfile?.totalVotes || 0;
-    
-    // Update user's vote record with price for prediction tracking
-    const voteData = {
-      vote: vote,
-      votedAt: new Date().toISOString(),
-      priceAtVote: currentPrice,
-      resolved: false,
-      correct: null,
-    };
-    
-    // Only increment total if voting on a NEW stock (not changing existing vote)
-    const isNewVote = !previousVote;
-    const newTotalVotes = isNewVote ? currentTotalVotes + 1 : currentTotalVotes;
-    
     await updateDoc(userRef, {
-      [`votes.${symbol}`]: voteData,
-      totalVotes: newTotalVotes,
-      reputationScore: newTotalVotes, // Base reputation until accuracy kicks in
-    });
-    
-    // Update community vote totals
-    const stockVotesSnap = await getDoc(stockVotesRef);
-    
-    if (!stockVotesSnap.exists()) {
-      await setDoc(stockVotesRef, {
+      votes: arrayUnion({
         symbol: symbol,
-        bullish: vote === 'bullish' ? 1 : 0,
-        bearish: vote === 'bearish' ? 1 : 0,
-        totalVotes: 1,
-        lastUpdated: serverTimestamp(),
-      });
-    } else {
-      const updates = {
-        lastUpdated: serverTimestamp(),
-      };
-      
-      if (previousVote && previousVote.vote !== vote) {
-        updates[previousVote.vote] = increment(-1);
-      }
-      
-      if (!previousVote || previousVote.vote !== vote) {
-        updates[vote] = increment(1);
-        if (!previousVote) {
-          updates.totalVotes = increment(1);
-        }
-      }
-      
-      await updateDoc(stockVotesRef, updates);
-    }
-    
-    console.log(`Recorded ${vote} vote for ${symbol}. Total votes now: ${newTotalVotes}`);
+        vote: vote, // 'bullish' or 'bearish'
+        votedAt: new Date().toISOString(),
+      })
+    });
+    console.log(`Recorded ${vote} vote for ${symbol}`);
     return true;
   } catch (error) {
     console.error('Error recording vote:', error);
     return false;
-  }
-};
-
-// Check and update prediction accuracy for a user's votes
-export const checkPredictionAccuracy = async (uid, symbol, currentPrice) => {
-  if (!uid || !symbol || !currentPrice) return null;
-  
-  try {
-    const userProfile = await getUserProfile(uid);
-    const voteData = userProfile?.votes?.[symbol];
-    
-    if (!voteData || voteData.resolved || !voteData.priceAtVote) return null;
-    
-    const priceAtVote = voteData.priceAtVote;
-    const priceChange = ((currentPrice - priceAtVote) / priceAtVote) * 100;
-    
-    // Only resolve if price moved at least 1%
-    if (Math.abs(priceChange) < 1) return null;
-    
-    const priceWentUp = priceChange > 0;
-    const predictedUp = voteData.vote === 'bullish';
-    const isCorrect = priceWentUp === predictedUp;
-    
-    const userRef = doc(db, 'users', uid);
-    
-    // Update vote as resolved
-    await updateDoc(userRef, {
-      [`votes.${symbol}.resolved`]: true,
-      [`votes.${symbol}.correct`]: isCorrect,
-      [`votes.${symbol}.resolvedAt`]: new Date().toISOString(),
-      [`votes.${symbol}.priceAtResolution`]: currentPrice,
-      [`votes.${symbol}.priceChangePercent`]: priceChange,
-      correctPredictions: increment(isCorrect ? 1 : 0),
-      streak: isCorrect ? increment(1) : 0, // Reset streak on wrong prediction
-    });
-    
-    // Update best streak if current streak is higher
-    const newProfile = await getUserProfile(uid);
-    if (newProfile.streak > (newProfile.bestStreak || 0)) {
-      await updateDoc(userRef, {
-        bestStreak: newProfile.streak,
-      });
-    }
-    
-    // Recalculate accuracy and reputation
-    await recalculateUserStats(uid);
-    
-    console.log(`Prediction for ${symbol}: ${isCorrect ? 'CORRECT' : 'WRONG'} (${priceChange.toFixed(2)}%)`);
-    return isCorrect;
-  } catch (error) {
-    console.error('Error checking prediction:', error);
-    return null;
-  }
-};
-
-// Recalculate user stats (accuracy and reputation score)
-export const recalculateUserStats = async (uid) => {
-  if (!uid) return false;
-  
-  try {
-    const userProfile = await getUserProfile(uid);
-    if (!userProfile) return false;
-    
-    const votes = userProfile.votes || {};
-    let totalResolved = 0;
-    let totalCorrect = 0;
-    
-    // Count resolved predictions
-    Object.values(votes).forEach(vote => {
-      if (vote.resolved) {
-        totalResolved++;
-        if (vote.correct) totalCorrect++;
-      }
-    });
-    
-    // Calculate accuracy (0-100)
-    const accuracy = totalResolved > 0 ? Math.round((totalCorrect / totalResolved) * 100) : 0;
-    
-    // Calculate reputation score (weighted formula)
-    // Accuracy: 50% weight (max 50 points)
-    // Followers: 30% weight (max 30 points, capped at 100 followers)
-    // Engagement: 20% weight (max 20 points, based on likes received)
-    const followerCount = userProfile.followerCount || 0;
-    const likesReceived = userProfile.totalLikesReceived || 0;
-    const streak = userProfile.streak || 0;
-    
-    const accuracyScore = accuracy * 0.5; // 0-50 points
-    const followerScore = Math.min(followerCount, 100) * 0.3; // 0-30 points
-    const engagementScore = Math.min(likesReceived, 100) * 0.2; // 0-20 points
-    const streakBonus = Math.min(streak * 2, 20); // Bonus for streaks (max 20 points)
-    
-    const reputationScore = Math.round(accuracyScore + followerScore + engagementScore + streakBonus);
-    
-    const userRef = doc(db, 'users', uid);
-    await updateDoc(userRef, {
-      accuracy: accuracy,
-      correctPredictions: totalCorrect,
-      reputationScore: reputationScore,
-    });
-    
-    console.log(`Updated stats for ${uid}: Accuracy ${accuracy}%, Reputation ${reputationScore}`);
-    return true;
-  } catch (error) {
-    console.error('Error recalculating stats:', error);
-    return false;
-  }
-};
-
-// Remove a user's vote on a stock
-export const removeVote = async (uid, symbol) => {
-  if (!uid || !symbol) return false;
-  
-  try {
-    const userRef = doc(db, 'users', uid);
-    const stockVotesRef = doc(db, 'stockVotes', symbol);
-    
-    const userProfile = await getUserProfile(uid);
-    const currentVotes = userProfile?.votes || {};
-    const previousVote = currentVotes[symbol];
-    
-    if (!previousVote) return true;
-    
-    await updateDoc(userRef, {
-      [`votes.${symbol}`]: null
-    });
-    
-    const stockVotesSnap = await getDoc(stockVotesRef);
-    if (stockVotesSnap.exists()) {
-      await updateDoc(stockVotesRef, {
-        [previousVote.vote]: increment(-1),
-        totalVotes: increment(-1),
-        lastUpdated: serverTimestamp(),
-      });
-    }
-    
-    console.log(`Removed vote for ${symbol}`);
-    return true;
-  } catch (error) {
-    console.error('Error removing vote:', error);
-    return false;
-  }
-};
-
-// Get user's votes
-export const getUserVotes = async (uid) => {
-  if (!uid) return {};
-  
-  const userProfile = await getUserProfile(uid);
-  return userProfile?.votes || {};
-};
-
-// Get community vote totals for a stock
-export const getStockVotes = async (symbol) => {
-  if (!symbol) return null;
-  
-  try {
-    const stockVotesRef = doc(db, 'stockVotes', symbol);
-    const stockVotesSnap = await getDoc(stockVotesRef);
-    
-    if (stockVotesSnap.exists()) {
-      return stockVotesSnap.data();
-    }
-    return { bullish: 0, bearish: 0, totalVotes: 0 };
-  } catch (error) {
-    console.error('Error getting stock votes:', error);
-    return { bullish: 0, bearish: 0, totalVotes: 0 };
-  }
-};
-
-// ============================================
-// SOCIAL FEATURES - FOLLOW SYSTEM
-// ============================================
-
-// Follow a user
-export const followUser = async (currentUid, targetUid) => {
-  if (!currentUid || !targetUid || currentUid === targetUid) return false;
-  
-  try {
-    const currentUserRef = doc(db, 'users', currentUid);
-    const targetUserRef = doc(db, 'users', targetUid);
-    
-    // Check if already following
-    const currentProfile = await getUserProfile(currentUid);
-    if (currentProfile?.following?.includes(targetUid)) {
-      console.log('Already following this user');
-      return true;
-    }
-    
-    // Add to current user's following list
-    await updateDoc(currentUserRef, {
-      following: arrayUnion(targetUid),
-      followingCount: increment(1),
-    });
-    
-    // Add to target user's followers list
-    await updateDoc(targetUserRef, {
-      followers: arrayUnion(currentUid),
-      followerCount: increment(1),
-    });
-    
-    // Recalculate target user's reputation (followers affect score)
-    await recalculateUserStats(targetUid);
-    
-    console.log(`User ${currentUid} followed ${targetUid}`);
-    return true;
-  } catch (error) {
-    console.error('Error following user:', error);
-    return false;
-  }
-};
-
-// Unfollow a user
-export const unfollowUser = async (currentUid, targetUid) => {
-  if (!currentUid || !targetUid || currentUid === targetUid) return false;
-  
-  try {
-    const currentUserRef = doc(db, 'users', currentUid);
-    const targetUserRef = doc(db, 'users', targetUid);
-    
-    // Remove from current user's following list
-    await updateDoc(currentUserRef, {
-      following: arrayRemove(targetUid),
-      followingCount: increment(-1),
-    });
-    
-    // Remove from target user's followers list
-    await updateDoc(targetUserRef, {
-      followers: arrayRemove(currentUid),
-      followerCount: increment(-1),
-    });
-    
-    // Recalculate target user's reputation
-    await recalculateUserStats(targetUid);
-    
-    console.log(`User ${currentUid} unfollowed ${targetUid}`);
-    return true;
-  } catch (error) {
-    console.error('Error unfollowing user:', error);
-    return false;
-  }
-};
-
-// Check if user is following another user
-export const isFollowing = async (currentUid, targetUid) => {
-  if (!currentUid || !targetUid) return false;
-  
-  const userProfile = await getUserProfile(currentUid);
-  return userProfile?.following?.includes(targetUid) || false;
-};
-
-// ============================================
-// SOCIAL FEATURES - COMMENTS
-// ============================================
-
-// Add a comment to a stock
-export const addComment = async (uid, symbol, content) => {
-  if (!uid || !symbol || !content) return null;
-  
-  try {
-    const userProfile = await getUserProfile(uid);
-    if (!userProfile) return null;
-    
-    const commentsRef = collection(db, 'stockComments');
-    const commentData = {
-      uid: uid,
-      symbol: symbol,
-      content: content,
-      displayName: userProfile.settings?.anonymousMode ? 'Anonymous' : (userProfile.displayName || 'User'),
-      createdAt: serverTimestamp(),
-      likes: [],
-      likeCount: 0,
-    };
-    
-    const docRef = await addDoc(commentsRef, commentData);
-    console.log(`Added comment to ${symbol}`);
-    
-    return { id: docRef.id, ...commentData, createdAt: new Date() };
-  } catch (error) {
-    console.error('Error adding comment:', error);
-    return null;
-  }
-};
-
-// Get comments for a stock
-export const getStockComments = async (symbol, limitCount = 20) => {
-  if (!symbol) return [];
-  
-  try {
-    const commentsRef = collection(db, 'stockComments');
-    // Simple query without orderBy to avoid needing Firestore index
-    const q = query(
-      commentsRef, 
-      where('symbol', '==', symbol),
-      limit(50)
-    );
-    const snapshot = await getDocs(q);
-    
-    const comments = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      comments.push({
-        id: doc.id,
-        ...data,
-        createdAt: data.createdAt?.toDate() || new Date(),
-      });
-    });
-    
-    // Sort by createdAt in JavaScript instead
-    comments.sort((a, b) => b.createdAt - a.createdAt);
-    
-    return comments.slice(0, limitCount);
-  } catch (error) {
-    console.error('Error getting comments:', error);
-    return [];
-  }
-};
-
-// Like a comment
-export const likeComment = async (uid, commentId, authorUid) => {
-  if (!uid || !commentId) return false;
-  
-  try {
-    const commentRef = doc(db, 'stockComments', commentId);
-    await updateDoc(commentRef, {
-      likes: arrayUnion(uid),
-      likeCount: increment(1),
-    });
-    
-    // Update author's total likes received (for reputation)
-    if (authorUid && authorUid !== uid) {
-      const authorRef = doc(db, 'users', authorUid);
-      await updateDoc(authorRef, {
-        totalLikesReceived: increment(1),
-      });
-      // Recalculate author's reputation
-      await recalculateUserStats(authorUid);
-    }
-    
-    return true;
-  } catch (error) {
-    console.error('Error liking comment:', error);
-    return false;
-  }
-};
-
-// Unlike a comment
-export const unlikeComment = async (uid, commentId, authorUid) => {
-  if (!uid || !commentId) return false;
-  
-  try {
-    const commentRef = doc(db, 'stockComments', commentId);
-    await updateDoc(commentRef, {
-      likes: arrayRemove(uid),
-      likeCount: increment(-1),
-    });
-    
-    // Update author's total likes received
-    if (authorUid && authorUid !== uid) {
-      const authorRef = doc(db, 'users', authorUid);
-      await updateDoc(authorRef, {
-        totalLikesReceived: increment(-1),
-      });
-      await recalculateUserStats(authorUid);
-    }
-    
-    return true;
-  } catch (error) {
-    console.error('Error unliking comment:', error);
-    return false;
-  }
-};
-
-// Delete a comment (only by author)
-export const deleteComment = async (uid, commentId) => {
-  if (!uid || !commentId) return false;
-  
-  try {
-    const commentRef = doc(db, 'stockComments', commentId);
-    const commentSnap = await getDoc(commentRef);
-    
-    if (commentSnap.exists() && commentSnap.data().uid === uid) {
-      await deleteDoc(commentRef);
-      console.log(`Deleted comment ${commentId}`);
-      return true;
-    }
-    return false;
-  } catch (error) {
-    console.error('Error deleting comment:', error);
-    return false;
-  }
-};
-
-// ============================================
-// LEADERBOARD - TOP TRADERS
-// ============================================
-
-// Get top traders by reputation score
-export const getTopTraders = async (limitCount = 10) => {
-  try {
-    const usersRef = collection(db, 'users');
-    // Simple query without orderBy to avoid needing Firestore index
-    const q = query(usersRef, limit(50));
-    const snapshot = await getDocs(q);
-    
-    const traders = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      // Include users with any votes (even 0 initially to show new users)
-      const totalVotes = data.totalVotes || 0;
-      const isAnonymous = data.settings?.anonymousMode === true;
-      
-      if (!isAnonymous) {
-        traders.push({
-          uid: doc.id,
-          displayName: data.displayName || data.email?.split('@')[0] || 'Trader',
-          totalVotes: totalVotes,
-          accuracy: data.accuracy || 0,
-          correctPredictions: data.correctPredictions || 0,
-          streak: data.streak || 0,
-          bestStreak: data.bestStreak || 0,
-          followerCount: data.followerCount || 0,
-          reputationScore: data.reputationScore || totalVotes, // Fallback to totalVotes
-        });
-      }
-    });
-    
-    // Sort by reputation score (or totalVotes as fallback) in JavaScript
-    traders.sort((a, b) => b.reputationScore - a.reputationScore || b.totalVotes - a.totalVotes);
-    
-    // Return top traders
-    return traders.slice(0, limitCount);
-  } catch (error) {
-    console.error('Error getting top traders:', error);
-    return [];
-  }
-};
-
-// Get user's rank
-export const getUserRank = async (uid) => {
-  if (!uid) return null;
-  
-  try {
-    const userProfile = await getUserProfile(uid);
-    if (!userProfile) return null;
-    
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('reputationScore', '>', userProfile.reputationScore || 0));
-    const snapshot = await getDocs(q);
-    
-    return snapshot.size + 1; // Rank is number of users with higher score + 1
-  } catch (error) {
-    console.error('Error getting user rank:', error);
-    return null;
   }
 };
 
@@ -751,7 +219,7 @@ export const addPriceAlert = async (uid, alert) => {
         id: Date.now().toString(),
         symbol: alert.symbol,
         targetPrice: alert.targetPrice,
-        condition: alert.condition,
+        condition: alert.condition, // 'above' or 'below'
         createdAt: new Date().toISOString(),
         triggered: false,
       })
@@ -788,96 +256,182 @@ export const removePriceAlert = async (uid, alertId) => {
 };
 
 // ============================================
-// PORTFOLIO FUNCTIONS
+// GLOBAL COMMUNITY CHAT FUNCTIONS
 // ============================================
 
-// Add a holding to portfolio
-export const addHolding = async (uid, holding) => {
-  if (!uid || !holding) return false;
+// Send a message to global chat
+export const sendGlobalMessage = async (uid, displayName, content, avatar = '👤') => {
+  if (!uid || !content?.trim()) return null;
   
   try {
-    const userRef = doc(db, 'users', uid);
-    const holdingData = {
-      id: Date.now().toString(),
-      symbol: holding.symbol.toUpperCase(),
-      name: holding.name || holding.symbol,
-      quantity: parseFloat(holding.quantity),
-      purchasePrice: parseFloat(holding.purchasePrice),
-      purchaseDate: holding.purchaseDate || new Date().toISOString(),
-      isCrypto: holding.isCrypto || false,
-      notes: holding.notes || '',
-      createdAt: new Date().toISOString(),
-    };
-    
-    await updateDoc(userRef, {
-      portfolio: arrayUnion(holdingData)
+    const messagesRef = collection(db, 'globalChat');
+    const docRef = await addDoc(messagesRef, {
+      uid,
+      displayName: displayName || 'Anonymous',
+      content: content.trim(),
+      avatar: avatar || '👤',
+      createdAt: serverTimestamp(),
+      likes: [],
+      likeCount: 0,
     });
-    console.log(`Added ${holding.symbol} to portfolio`);
-    return holdingData;
+    return docRef.id;
   } catch (error) {
-    console.error('Error adding holding:', error);
-    return false;
+    console.error('Error sending global message:', error);
+    return null;
   }
 };
 
-// Update a holding in portfolio
-export const updateHolding = async (uid, holdingId, updates) => {
-  if (!uid || !holdingId) return false;
-  
+// Get recent global chat messages
+export const getGlobalMessages = async (limitCount = 50) => {
   try {
-    const userProfile = await getUserProfile(uid);
-    if (!userProfile?.portfolio) return false;
-    
-    const holdingIndex = userProfile.portfolio.findIndex(h => h.id === holdingId);
-    if (holdingIndex === -1) return false;
-    
-    const oldHolding = userProfile.portfolio[holdingIndex];
-    const updatedHolding = { ...oldHolding, ...updates, updatedAt: new Date().toISOString() };
-    
-    // Remove old and add updated
-    const userRef = doc(db, 'users', uid);
-    await updateDoc(userRef, {
-      portfolio: arrayRemove(oldHolding)
+    const q = query(
+      collection(db, 'globalChat'),
+      orderBy('createdAt', 'desc'),
+      limit(limitCount)
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+    })).reverse();
+  } catch (error) {
+    console.error('Error fetching global messages:', error);
+    return [];
+  }
+};
+
+// Listen for new global chat messages in real-time
+export const listenToGlobalChat = (limitCount, callback) => {
+  const q = query(
+    collection(db, 'globalChat'),
+    orderBy('createdAt', 'desc'),
+    limit(limitCount)
+  );
+  return onSnapshot(q, (snapshot) => {
+    const messages = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+    })).reverse();
+    callback(messages);
+  });
+};
+
+// Like a global chat message
+export const likeGlobalMessage = async (uid, messageId) => {
+  if (!uid || !messageId) return false;
+  try {
+    const msgRef = doc(db, 'globalChat', messageId);
+    await updateDoc(msgRef, {
+      likes: arrayUnion(uid),
+      likeCount: (await getDoc(msgRef)).data()?.likeCount + 1 || 1,
     });
-    await updateDoc(userRef, {
-      portfolio: arrayUnion(updatedHolding)
-    });
-    
-    console.log(`Updated holding ${holdingId}`);
     return true;
   } catch (error) {
-    console.error('Error updating holding:', error);
+    console.error('Error liking message:', error);
     return false;
   }
 };
 
-// Remove a holding from portfolio
-export const removeHolding = async (uid, holdingId) => {
-  if (!uid || !holdingId) return false;
+// ============================================
+// ANNOUNCEMENTS / SYSTEM ALERTS FUNCTIONS
+// ============================================
+
+// Post an announcement (admin use)
+export const postAnnouncement = async (uid, displayName, content, type = 'update') => {
+  if (!uid || !content?.trim()) return null;
   
   try {
-    const userProfile = await getUserProfile(uid);
-    if (!userProfile?.portfolio) return false;
-    
-    const holdingToRemove = userProfile.portfolio.find(h => h.id === holdingId);
-    if (!holdingToRemove) return false;
-    
-    const userRef = doc(db, 'users', uid);
-    await updateDoc(userRef, {
-      portfolio: arrayRemove(holdingToRemove)
+    const announcementsRef = collection(db, 'announcements');
+    const docRef = await addDoc(announcementsRef, {
+      uid,
+      displayName: displayName || 'finnysights',
+      content: content.trim(),
+      type, // 'update', 'feature', 'alert', 'maintenance'
+      createdAt: serverTimestamp(),
+      readBy: [],
     });
-    console.log(`Removed holding ${holdingId}`);
+    return docRef.id;
+  } catch (error) {
+    console.error('Error posting announcement:', error);
+    return null;
+  }
+};
+
+// Get recent announcements
+export const getAnnouncements = async (limitCount = 20) => {
+  try {
+    const q = query(
+      collection(db, 'announcements'),
+      orderBy('createdAt', 'desc'),
+      limit(limitCount)
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+    }));
+  } catch (error) {
+    console.error('Error fetching announcements:', error);
+    return [];
+  }
+};
+
+// Listen to announcements in real-time
+export const listenToAnnouncements = (callback) => {
+  const q = query(
+    collection(db, 'announcements'),
+    orderBy('createdAt', 'desc'),
+    limit(10)
+  );
+  return onSnapshot(q, (snapshot) => {
+    const announcements = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+    }));
+    callback(announcements);
+  });
+};
+
+// Mark announcement as read by user
+export const markAnnouncementRead = async (uid, announcementId) => {
+  if (!uid || !announcementId) return false;
+  try {
+    const annRef = doc(db, 'announcements', announcementId);
+    await updateDoc(annRef, {
+      readBy: arrayUnion(uid),
+    });
     return true;
   } catch (error) {
-    console.error('Error removing holding:', error);
+    console.error('Error marking announcement read:', error);
     return false;
   }
 };
 
-// Get user's portfolio
-export const getPortfolio = async (uid) => {
-  if (!uid) return [];
+// ============================================
+// BATCH USER AVATAR FETCHING
+// ============================================
+
+// Get multiple user avatars at once (for leaderboard)
+export const getUserAvatars = async (uids) => {
+  if (!uids || uids.length === 0) return {};
   
-  const userProfile = await getUserProfile(uid);
-  return userProfile?.portfolio || [];
+  const avatarMap = {};
+  try {
+    for (const uid of uids) {
+      const profile = await getUserProfile(uid);
+      if (profile) {
+        avatarMap[uid] = {
+          avatar: profile.avatar || '👤',
+          displayName: profile.displayName || 'Trader',
+        };
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching avatars:', error);
+  }
+  return avatarMap;
 };

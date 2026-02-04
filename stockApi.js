@@ -1,7 +1,7 @@
 // Stock API Service using Finnhub
 // Free tier: 60 calls/minute
 
-const FINNHUB_API_KEY = 'd5r20chr01qqqlh9ass0d5r20chr01qqqlh9assg';
+const FINNHUB_API_KEY = 'YOUR_API_KEY_HERE'; // Replace with your key
 const BASE_URL = 'https://finnhub.io/api/v1';
 
 // Get real-time quote for a stock
@@ -27,6 +27,7 @@ export const getQuote = async (symbol) => {
       open: data.o,                // Open price
       previousClose: data.pc,      // Previous close
       timestamp: data.t,           // Timestamp
+      volume: data.v,              // Current volume
     };
   } catch (error) {
     console.error(`Error fetching quote for ${symbol}:`, error);
@@ -45,7 +46,7 @@ export const getMultipleQuotes = async (symbols) => {
       quotes[symbol] = quote;
     }
     // Small delay to avoid rate limiting
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
   
   return quotes;

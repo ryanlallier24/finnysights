@@ -2,7 +2,7 @@
 // Uses Finnhub for stock news (already have API key)
 // Uses CoinPaprika for crypto market updates (free, CORS supported)
 
-const FINNHUB_API_KEY = 'YOUR_API_KEY_HERE'; // Replace with your key
+const FINNHUB_API_KEY = 'd5r20chr01qqqlh9ass0d5r20chr01qqqlh9assg'; // Replace with your key
 const FINNHUB_BASE = 'https://finnhub.io/api/v1';
 const COINPAPRIKA_BASE = 'https://api.coinpaprika.com/v1';
 

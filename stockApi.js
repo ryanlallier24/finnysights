@@ -12,40 +12,22 @@ const WS_URL = `wss://ws.finnhub.io?token=${FINNHUB_API_KEY}`;
 
 const isMarketOpen = () => {
   const now = new Date();
-  const etOptions = { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short' };
-  const etString = now.toLocaleString('en-US', etOptions);
-  
-  const parts = etString.split(', ');
-  const day = parts[0];
-  const timeParts = parts[1].split(':');
-  const hour = parseInt(timeParts[0]);
-  const minute = parseInt(timeParts[1]);
-  const timeInMinutes = hour * 60 + minute;
-  
+  const etDay = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short' }).format(now);
+  const etHour = parseInt(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(now));
+  const etMinute = parseInt(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', minute: 'numeric' }).format(now));
+  const timeInMinutes = etHour * 60 + etMinute;
   const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-  const marketOpen = 9 * 60 + 30;
-  const marketClose = 16 * 60;
-  
-  return weekdays.includes(day) && timeInMinutes >= marketOpen && timeInMinutes < marketClose;
+  return weekdays.includes(etDay) && timeInMinutes >= 570 && timeInMinutes < 960;
 };
 
 const isExtendedHours = () => {
   const now = new Date();
-  const etOptions = { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short' };
-  const etString = now.toLocaleString('en-US', etOptions);
-  
-  const parts = etString.split(', ');
-  const day = parts[0];
-  const timeParts = parts[1].split(':');
-  const hour = parseInt(timeParts[0]);
-  const minute = parseInt(timeParts[1]);
-  const timeInMinutes = hour * 60 + minute;
-  
+  const etDay = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short' }).format(now);
+  const etHour = parseInt(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(now));
+  const etMinute = parseInt(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', minute: 'numeric' }).format(now));
+  const timeInMinutes = etHour * 60 + etMinute;
   const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-  const preMarketOpen = 4 * 60;
-  const afterMarketClose = 20 * 60;
-  
-  return weekdays.includes(day) && timeInMinutes >= preMarketOpen && timeInMinutes < afterMarketClose;
+  return weekdays.includes(etDay) && timeInMinutes >= 240 && timeInMinutes < 1200;
 };
 
 export { isMarketOpen, isExtendedHours };

@@ -3,7 +3,7 @@ import { TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, Search, Globe, BarChart
 import { auth } from './firebase.js';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { addToWatchlist, removeFromWatchlist, getWatchlist, recordVote, removeVote, getUserVotes, getUserProfile, addComment, getStockComments, likeComment, unlikeComment, getTopTraders, followUser, unfollowUser, addHolding, removeHolding, getPortfolio, addPriceAlert, removePriceAlert, sendGlobalMessage, listenToGlobalChat, likeGlobalMessage, listenToAnnouncements, markAnnouncementRead, postAnnouncement, getUserAvatars } from './firestore.js';
-import { getMultipleQuotes, getQuote, searchStocks } from './stockApi.js';
+import { getMultipleQuotes, getQuote, searchStocks, initializeRealTimeData, disconnectWebSocket, getWebSocketStatus, isMarketOpen, subscribeSymbol } from './stockApi.js';
 import { getCryptoMarketData, searchCrypto, formatCryptoPrice, formatMarketCap } from './cryptoApi.js';
 import { getCombinedNews, getStockNews, getCryptoNewsBySymbol, formatTimeAgo, truncateText } from './newsApi.js';
 
@@ -961,6 +961,7 @@ export default function Finnysights() {
   const [isLoadingCrypto, setIsLoadingCrypto] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [isOnline, setIsOnline] = useState(true);
+  const [isLiveStreaming, setIsLiveStreaming] = useState(false);
   
   const [stockSearchResults, setStockSearchResults] = useState([]);
   const [cryptoSearchResults, setCryptoSearchResults] = useState([]);
@@ -992,6 +993,33 @@ export default function Finnysights() {
   const fetchItemNews = useCallback(async (symbol, isCrypto) => { setIsLoadingItemNews(true); let newsData; if (isCrypto) { newsData = await getCryptoNewsBySymbol(symbol); } else { newsData = await getStockNews(symbol); } setItemNews(newsData || []); setIsLoadingItemNews(false); }, []);
   const fetchCryptoData = useCallback(async () => { setIsLoadingCrypto(true); try { const cryptoData = await getCryptoMarketData(10); setCryptos(cryptoData.map(c => ({ ...c, ticker: c.symbol, thumbsUp: Math.floor(Math.random() * 5000) + 1000, thumbsDown: Math.floor(Math.random() * 2000) + 500, sentiment: Math.floor(Math.random() * 40) + 50 }))); setIsOnline(true); } catch (error) { console.error('Error fetching crypto:', error); } setIsLoadingCrypto(false); }, []);
   const fetchStockPrices = useCallback(async () => { setIsLoadingStocks(true); try { const symbols = stocks.map(s => s.ticker); const quotes = await getMultipleQuotes(symbols); setStocks(prev => prev.map(stock => { const quote = quotes[stock.ticker]; if (quote) return { ...stock, price: quote.currentPrice, change: quote.changePercent, high: quote.high, low: quote.low, open: quote.open, volume: quote.volume }; return stock; })); setLastUpdated(new Date()); setIsOnline(true); } catch (error) { console.error('Error fetching stocks:', error); setIsOnline(false); } setIsLoadingStocks(false); }, [stocks]);
+
+  // WebSocket real-time trade handler
+  const handleLiveTrade = useCallback((trade) => {
+    if (!trade || !trade.symbol) return;
+    setStocks(prev => prev.map(stock => {
+      if (stock.ticker === trade.symbol) {
+        return { ...stock, price: trade.currentPrice, change: trade.changePercent, high: trade.high || stock.high, low: trade.low || stock.low, volume: trade.volume || stock.volume };
+      }
+      return stock;
+    }));
+    setLastUpdated(new Date());
+    setIsOnline(true);
+    if (!isLiveStreaming) setIsLiveStreaming(true);
+  }, [isLiveStreaming]);
+
+  // Initialize real-time data (REST + WebSocket)
+  const initRealTime = useCallback(async () => {
+    setIsLoadingStocks(true);
+    try {
+      const symbols = stocks.map(s => s.ticker);
+      const initialQuotes = await initializeRealTimeData(symbols, handleLiveTrade);
+      setStocks(prev => prev.map(stock => { const quote = initialQuotes[stock.ticker]; if (quote) return { ...stock, price: quote.currentPrice, change: quote.changePercent, high: quote.high, low: quote.low, open: quote.open, volume: quote.volume }; return stock; }));
+      setLastUpdated(new Date()); setIsOnline(true);
+      if (isMarketOpen()) setIsLiveStreaming(true);
+    } catch (error) { console.error('Error initializing real-time data:', error); setIsOnline(false); }
+    setIsLoadingStocks(false);
+  }, [stocks, handleLiveTrade]);
   const fetchAllPrices = useCallback(async () => { await Promise.all([fetchStockPrices(), fetchCryptoData()]); setLastUpdated(new Date()); }, [fetchStockPrices, fetchCryptoData]);
   const fetchComments = useCallback(async (symbol) => { if (!symbol) return; const stockComments = await getStockComments(symbol, 20); setComments(stockComments); }, []);
   const fetchLeaderboard = useCallback(async () => { const topLeaders = await getTopTraders(5); setLeaders(topLeaders); }, []);
@@ -1049,10 +1077,10 @@ export default function Finnysights() {
 
   useEffect(() => { const handleClickOutside = (e) => { if (searchRef.current && !searchRef.current.contains(e.target)) setShowSearchDropdown(false); }; document.addEventListener('mousedown', handleClickOutside); return () => document.removeEventListener('mousedown', handleClickOutside); }, []);
   useEffect(() => { if (searchQuery.length < 2) { setStockSearchResults([]); setCryptoSearchResults([]); setShowSearchDropdown(false); return; } if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); searchTimeoutRef.current = setTimeout(async () => { setIsSearching(true); setShowSearchDropdown(true); const [stockResults, cryptoResults] = await Promise.all([searchStocks(searchQuery), searchCrypto(searchQuery)]); setStockSearchResults(stockResults); setCryptoSearchResults(cryptoResults); setIsSearching(false); }, 300); return () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); }; }, [searchQuery]);
-  const handleSearchSelectStock = async (result) => { setShowSearchDropdown(false); setSearchQuery(''); setActiveTab('stocks'); const existingStock = stocks.find(s => s.ticker === result.symbol); if (existingStock) { setSelectedItem(existingStock); setSelectedIsCrypto(false); return; } const quote = await getQuote(result.symbol); const newStock = { ticker: result.symbol, name: result.name, sector: 'Stock', price: quote?.currentPrice || 0, change: quote?.changePercent || 0, high: quote?.high || 0, low: quote?.low || 0, open: quote?.open || 0, thumbsUp: 0, thumbsDown: 0, sentiment: 50, sentimentLabel: 'Neutral' }; setStocks(prev => [newStock, ...prev]); setSelectedItem(newStock); setSelectedIsCrypto(false); };
+  const handleSearchSelectStock = async (result) => { setShowSearchDropdown(false); setSearchQuery(''); setActiveTab('stocks'); const existingStock = stocks.find(s => s.ticker === result.symbol); if (existingStock) { setSelectedItem(existingStock); setSelectedIsCrypto(false); return; } const quote = await getQuote(result.symbol); const newStock = { ticker: result.symbol, name: result.name, sector: 'Stock', price: quote?.currentPrice || 0, change: quote?.changePercent || 0, high: quote?.high || 0, low: quote?.low || 0, open: quote?.open || 0, volume: quote?.volume || 0, thumbsUp: 0, thumbsDown: 0, sentiment: 50, sentimentLabel: 'Neutral' }; setStocks(prev => [newStock, ...prev]); setSelectedItem(newStock); setSelectedIsCrypto(false); if (isMarketOpen()) subscribeSymbol(result.symbol); };
   const handleSearchSelectCrypto = async (result) => { setShowSearchDropdown(false); setSearchQuery(''); setActiveTab('crypto'); const existingCrypto = cryptos.find(c => c.symbol === result.symbol); if (existingCrypto) { setSelectedItem(existingCrypto); setSelectedIsCrypto(true); return; } const newCrypto = { ...result, ticker: result.symbol, price: 0, change: 0, thumbsUp: 100, thumbsDown: 50, sentiment: 50 }; setCryptos(prev => [newCrypto, ...prev]); setSelectedItem(newCrypto); setSelectedIsCrypto(true); };
   
-  useEffect(() => { fetchStockPrices(); fetchCryptoData(); fetchLeaderboard(); fetchNews(); const interval = setInterval(fetchAllPrices, 60000); return () => clearInterval(interval); }, []);
+  useEffect(() => { initRealTime(); fetchCryptoData(); fetchLeaderboard(); fetchNews(); const pollInterval = setInterval(() => { if (!isMarketOpen()) { fetchStockPrices(); } fetchCryptoData(); }, isMarketOpen() ? 120000 : 60000); return () => { clearInterval(pollInterval); disconnectWebSocket(); }; }, []);
   useEffect(() => { if (selectedItem) { const symbol = selectedIsCrypto ? selectedItem.symbol : selectedItem.ticker; fetchComments(symbol); fetchItemNews(symbol, selectedIsCrypto); } }, [selectedItem, selectedIsCrypto, fetchComments, fetchItemNews]);
   useEffect(() => { updatePortfolioPrices(); }, [stocks, cryptos, updatePortfolioPrices]);
   useEffect(() => { if (currentUser) fetchPortfolio(); }, [currentUser, fetchPortfolio]);
@@ -1142,7 +1170,7 @@ export default function Finnysights() {
         <div className="border-t border-slate-800/50 bg-slate-900/30"><div className="max-w-7xl mx-auto px-4 py-2"><div className="flex items-center gap-3 overflow-x-auto pb-1"><span className="text-[10px] text-slate-500 font-bold shrink-0">MARKETS</span>{EXCHANGES.map(exchange => <ExchangeBadge key={exchange.id} exchange={exchange} />)}</div></div></div>
       </header>
       
-      {lastUpdated && (<div className="relative z-10 bg-slate-800/30 border-b border-slate-700/30"><div className="max-w-7xl mx-auto px-4 py-1.5 flex items-center justify-center gap-2"><Wifi size={12} className={isOnline ? 'text-emerald-400' : 'text-rose-400'} /><span className="text-[10px] text-slate-500">{isOnline ? 'Live prices' : 'Offline'} • Last updated: {lastUpdated.toLocaleTimeString()}</span></div></div>)}
+      {lastUpdated && (<div className="relative z-10 bg-slate-800/30 border-b border-slate-700/30"><div className="max-w-7xl mx-auto px-4 py-1.5 flex items-center justify-center gap-2">{isLiveStreaming ? <><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span></span><span className="text-[10px] font-bold text-red-400">LIVE</span></> : <Wifi size={12} className={isOnline ? 'text-emerald-400' : 'text-rose-400'} />}<span className="text-[10px] text-slate-500">{isLiveStreaming ? 'Real-time streaming' : isOnline ? 'REST polling' : 'Offline'} • Updated: {lastUpdated.toLocaleTimeString()}</span></div></div>)}
       
       <main className="relative z-10 max-w-7xl mx-auto px-4 py-6">
         <div className="grid lg:grid-cols-3 gap-6">

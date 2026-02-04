@@ -1,7 +1,7 @@
 // Stock API Service using Finnhub
 // Free tier: 60 calls/minute
 
-const FINNHUB_API_KEY = 'YOUR_API_KEY_HERE'; // Replace with your key
+const FINNHUB_API_KEY = 'd5r20chr01qqqlh9ass0d5r20chr01qqqlh9assg'; // Replace with your key
 const BASE_URL = 'https://finnhub.io/api/v1';
 
 // Get real-time quote for a stock

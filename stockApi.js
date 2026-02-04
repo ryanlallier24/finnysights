@@ -2,7 +2,7 @@
 // WebSocket for real-time during market hours, REST polling as fallback
 // Free tier: 60 REST calls/minute, 1 WebSocket connection
 
-const FINNHUB_API_KEY = 'YOUR_API_KEY_HERE'; // Replace with your key
+const FINNHUB_API_KEY = 'd5r20chr01qqqlh9ass0d5r20chr01qqqlh9assg'; // Replace with your key
 const BASE_URL = 'https://finnhub.io/api/v1';
 const WS_URL = `wss://ws.finnhub.io?token=${FINNHUB_API_KEY}`;
 

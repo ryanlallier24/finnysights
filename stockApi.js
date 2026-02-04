@@ -200,7 +200,7 @@ export const connectWebSocket = (symbols, onTrade) => {
       isConnecting = false;
       stopHeartbeat();
 
-      if ((isMarketOpen() || isExtendedHours()) && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      if (isMarketOpen() && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         const delay = RECONNECT_DELAY * Math.min(reconnectAttempts + 1, 5);
         console.log(`Reconnecting in ${delay / 1000}s (attempt ${reconnectAttempts + 1})...`);
         reconnectTimer = setTimeout(() => {
@@ -335,7 +335,7 @@ export const initializeRealTimeData = async (symbols, onUpdate) => {
   });
 
   // Connect WebSocket if market is open
-  if (isMarketOpen() || isExtendedHours()) {
+  if (isMarketOpen()) {
     console.log('🔴 Market open - connecting WebSocket for live data...');
     connectWebSocket(symbols, onUpdate);
   } else {
